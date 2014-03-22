@@ -1,7 +1,12 @@
+#!/bin/bash
+
+
+### [INTRO] ###
 echo "Welcome to MyHarem (c)2003-2014 By Claudio Nanni"
 echo " "
 
-#Read configuration file
+
+### [SET CONFIGURATION] ###
 source /etc/myharem.conf
 export basedir
 export instances=$basedir/instances
@@ -10,6 +15,8 @@ export remote=$basedir/remote
 export erased=$basedir/erased
 export logdir=$basedir/logs
 
+
+### [CHECK PARAMETERS] ###
 if [ "$#" -eq 0 ]
 then
   echo "MyHarem - available commands:"
@@ -18,6 +25,7 @@ then
   exit
 fi
 
+### [SETUP IF FIRST INVOCATION USING 'basedir'] ###
 # Create structure in case it is the first time. Add checks later to create only if.
 if test -x $basedir
 then
@@ -33,5 +41,34 @@ else
   mkdir -p $logdir
 fi
 
-# Launch the invoked command
+
+### [LAUNCH COMMAND WITH PARAMETERS. NOW ONLY MAX THREE CONTEMPLATED] ###
 mh-$1 $2 $3 $4
+
+exit
+
+### [CURRENT AVAILABLE COMMANDS] ###
+
+:cmd:mh-cli:
+:dsc:connect with mysql client to an instance
+
+:cmd:mh-deploy:
+:dsc:deploy an instance using the specified id which will also be used as server-id, tcp port, socket
+:mh-show:
+
+:cmd:mh-service:
+:dsc:start/stop/install an instance
+
+:cmd:mh-status:
+:dsc:show the current general status
+
+:cmd:mh-erase:
+:dsc:eliminate an instance deployement from disk including all data
+
+:cmd:mh-tarballs:
+:dsc:retrieve the binary tarballs urls from a remote fixed webpage (updated manually). It is a facility to help get at least latest major releases.
+
+
+
+
+
