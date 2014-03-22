@@ -1,0 +1,72 @@
+#!/usr/bin/bash
+# MariaDB 5.5
+
+# x86_64 - centos5 is old glibc
+R1|MariaDB 5.5.35 x86_64|http://mirror2.hs-esslingen.de/mariadb/mariadb-5.5.36/kvm-bintar-centos5-amd64/mariadb-5.5.36-linux-x86_64.tar.gz
+R2|MariaDB 5.5.35 x86_64 glibc > 2.1.14|http://mirror2.hs-esslingen.de/mariadb/mariadb-5.5.36/kvm-bintar-quantal-amd64/mariadb-5.5.36-linux-x86_64.tar.gz
+
+# i686 - centos5 is old glibc
+R3|MariaDB 5.5.35 i686|http://mirror2.hs-esslingen.de/mariadb/mariadb-5.5.36/kvm-bintar-centos5-x86/mariadb-5.5.36-linux-i686.tar.gz
+R4|MariaDB 5.5.35 i686 glibc > 2.1.14|http://mirror2.hs-esslingen.de/mariadb/mariadb-5.5.36/kvm-bintar-quantal-x86/mariadb-5.5.36-linux-i686.tar.gz
+
+# x86_64 - centos5 is old glibc
+R5|MariaDB 5.5.36 x86_64|http://mirror2.hs-esslingen.de/mariadb/mariadb-5.5.36/kvm-bintar-centos5-amd64/mariadb-5.5.36-linux-x86_64.tar.gz
+R6|MariaDB 5.5.36 x86_64 glibc > 2.1.14|http://mirror2.hs-esslingen.de/mariadb/mariadb-5.5.36/kvm-bintar-quantal-amd64/mariadb-5.5.36-linux-x86_64.tar.gz
+
+# i686 - centos5 is old glibc
+R7|MariaDB 5.5.36 i686|http://mirror2.hs-esslingen.de/mariadb/mariadb-5.5.36/kvm-bintar-centos5-x86/mariadb-5.5.36-linux-i686.tar.gz
+R8|MariaDB 5.5.36 i686 glibc > 2.1.14|http://mirror2.hs-esslingen.de/mariadb/mariadb-5.5.36/kvm-bintar-quantal-x86/mariadb-5.5.36-linux-i686.tar.gz
+
+
+# MariaDB 10.0
+
+# x86_64 - centos5 is old glibc
+R9|MariaDB 10.0.7 x86_64|http://mirror2.hs-esslingen.de/mariadb/mariadb-10.0.8/kvm-bintar-centos5-amd64/mariadb-10.0.8-linux-x86_64.tar.gz
+R10|MariaDB 10.0.7 x86_64 glibc > 2.1.14|http://mirror2.hs-esslingen.de/mariadb/mariadb-10.0.8/kvm-bintar-quantal-amd64/mariadb-10.0.8-linux-x86_64.tar.gz
+
+# i686 - centos5 is old glibc
+R11|MariaDB 10.0.7 i686|http://mirror2.hs-esslingen.de/mariadb/mariadb-10.0.8/kvm-bintar-centos5-x86/mariadb-10.0.8-linux-i686.tar.gz
+R12|MariaDB 10.0.7 i686 glibc > 2.1.14|http://mirror2.hs-esslingen.de/mariadb/mariadb-10.0.8/kvm-bintar-quantal-x86/mariadb-10.0.8-linux-i686.tar.gz
+
+# x86_64 - centos5 is old glibc
+R13|MariaDB 10.0.8 x86_64|http://mirror2.hs-esslingen.de/mariadb/mariadb-10.0.8/kvm-bintar-centos5-amd64/mariadb-10.0.8-linux-x86_64.tar.gz
+R14|MariaDB 10.0.8 x86_64 glibc > 2.1.14|http://mirror2.hs-esslingen.de/mariadb/mariadb-10.0.8/kvm-bintar-quantal-amd64/mariadb-10.0.8-linux-x86_64.tar.gz
+
+# i686 - centos5 is old glibc
+R15|MariaDB 10.0.8 i686|http://mirror2.hs-esslingen.de/mariadb/mariadb-10.0.8/kvm-bintar-centos5-x86/mariadb-10.0.8-linux-i686.tar.gz
+R16|MariaDB 10.0.8 x86_64 glibc > 2.1.14|http://mirror2.hs-esslingen.de/mariadb/mariadb-10.0.8/kvm-bintar-quantal-amd64/mariadb-10.0.8-linux-x86_64.tar.gz
+
+
+# MySQL 5.1
+R17|MySQL 5.1.73 x86_64|http://dev.mysql.com/get/Downloads/MySQL-5.1/mysql-5.1.73-linux-x86_64-glibc23.tar.gz
+R18|MySQL 5.1.73 i686|http://dev.mysql.com/get/Downloads/MySQL-5.1/mysql-5.1.73-linux-i686-glibc23.tar.gz
+
+
+# MySQL 5.5
+R19|MySQL 5.5 x86_64|http://dev.mysql.com/get/Downloads/MySQL-5.5/mysql-5.5.36-linux2.6-x86_64.tar.gz
+R20|MySQL 5.5 i686|http://dev.mysql.com/get/Downloads/MySQL-5.5/mysql-5.5.36-linux2.6-i686.tar.gz
+
+# MySQL 5.6
+R21|MySQL 5.6.16 x86_64|http://dev.mysql.com/get/Downloads/MySQL-5.6/mysql-5.6.16-linux-glibc2.5-x86_64.tar.gz
+R22|MySQL 5.6.16 i686|http://dev.mysql.com/get/Downloads/MySQL-5.6/mysql-5.6.16-linux-glibc2.5-i686.tar.gz
+
+# MySQL 5.7
+R23|MySQL 5.7.3-m13 x86_64|http://dev.mysql.com/get/Downloads/MySQL-5.7/mysql-5.7.3-m13-linux-glibc2.5-x86_64.tar.gz
+R24|MySQL 5.7.3-m13 i686|http://dev.mysql.com/get/Downloads/MySQL-5.7/mysql-5.7.3-m13-linux-glibc2.5-i686.tar.gz
+
+
+# Percona 5.1
+R25|Percona 5.1.73 x86_64|http://www.percona.com/redir/downloads/Percona-Server-5.1/Percona-Server-5.1.73-rel14.11/binary/linux/x86_64/Percona-Server-5.1.73-rel14.11-603.Linux.x86_64.tar.gz
+R26|Percona 5.1.73 i686http://www.percona.com/redir/downloads/Percona-Server-5.1/Percona-Server-5.1.73-rel14.11/binary/linux/i686/Percona-Server-5.1.73-rel14.11-603.Linux.i686.tar.gz
+
+# Percona 5.5
+R27|Percona 5.5.35 x86_64|http://www.percona.com/redir/downloads/Percona-Server-5.5/LATEST/binary/linux/x86_64/Percona-Server-5.5.35-rel33.0-611.Linux.x86_64.tar.gz
+R28|Percona 5.5.35 i686|http://www.percona.com/redir/downloads/Percona-Server-5.5/LATEST/binary/linux/i686/Percona-Server-5.5.35-rel33.0-611.Linux.i686.tar.gz
+
+# Percona 5.6
+R29|Percona 5.6.15 i686 openssl|http://www.percona.com/redir/downloads/Percona-Server-5.6/LATEST/binary/linux/i686/Percona-Server-5.6.15-rel63.0-519-static-openssl-1.0.1e.Linux.i686.tar.gz
+R30|Percona 5.6.15 i686|http://www.percona.com/redir/downloads/Percona-Server-5.6/LATEST/binary/linux/i686/Percona-Server-5.6.15-rel63.0-519.Linux.i686.tar.gz
+
+R31|Percona 5.6.15 x86_64 openssl|http://www.percona.com/redir/downloads/Percona-Server-5.6/LATEST/binary/linux/x86_64/Percona-Server-5.6.15-rel63.0-519-static-openssl-1.0.1e.Linux.x86_64.tar.gz
+R32|Percona 5.6.15 x86_64|http://www.percona.com/redir/downloads/Percona-Server-5.6/LATEST/binary/linux/x86_64/Percona-Server-5.6.15-rel63.0-519.Linux.x86_64.tar.gz
+

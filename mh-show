@@ -1,0 +1,29 @@
+#!/usr/bin/bash
+echo " "
+if [ "$1" == help ]
+then
+  echo "MyHarem show - Lists the available tarballs, local or remote"
+  echo "============================="
+  echo "Usage: mh show local|remote"
+  echo " "
+  exit
+fi
+
+
+id=$1
+if [ "$id" = local ]
+then
+  echo "Available local tarballs:"
+  echo "========================="
+  ls -l /var/opt/myharem/local/*.tar.gz | awk -F"/local/" '{print $2}' | awk '{print "[L"NR"] "$0}'
+  exit
+fi
+if [ "$id" = remote ]
+then
+  echo "Available remote tarballs:"
+  echo "=========================="
+  grep "|" /var/opt/myharem/remote/list | awk -F"|" '{print "["$1"] "$2"\t\turl: "$3}'
+  exit
+fi
+
+

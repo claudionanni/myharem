@@ -1,0 +1,29 @@
+#!/usr/bin/bash
+echo " "
+if [ "$1" == help ]
+then
+  echo "MyHarem status - Shows the current status of the instances, what is installed, started, and available to deploy."
+  echo "============================="
+  echo "Usage: mh status"
+  echo " "
+  exit
+fi
+
+echo "$0"
+echo "List of MyHarem instances deployed:"
+echo "--------------------------------------"
+ls -l $instances/ | grep "^drw" | awk '{print $9}' | awk -F"." '{print "["$NF"] "$0}'
+echo " "
+echo "Note: deployed does not mean initialized (mysql_install_db), you can do it by using: mh service install <id> "
+echo " "
+echo "Instances that are running:"
+echo "--------------------------------------"
+#ps -ef | grep "bin/mysqld " |  awk '{print $2" "$8}' | awk -F"$instances" '{print $2}' | awk -F"." '{print "["$NF"] "$0" [started]"}'
+ps -ef | grep "bin/mysqld " |  awk '{print $8"    pid:"$2}' | grep -v grep | awk -F"$instances/" '{print $2}' | awk -F"/bin/mysqld" '{print $1" "$2}' |sort
+echo " "
+echo " "
+mh show local
+echo " "
+mh show remote
+
+

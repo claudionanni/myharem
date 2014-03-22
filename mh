@@ -1,0 +1,37 @@
+echo "Welcome to MyHarem (c)2003-2014 By Claudio Nanni"
+echo " "
+
+#Read configuration file
+source /etc/myharem.conf
+export basedir
+export instances=$basedir/instances
+export local=$basedir/local
+export remote=$basedir/remote
+export erased=$basedir/erased
+export logdir=$basedir/logs
+
+if [ "$#" -eq 0 ]
+then
+  echo "MyHarem - available commands:"
+  echo "============================="
+  ls -1 $0-* | awk -F"-" '{print $1" "$2}'
+  exit
+fi
+
+# Create structure in case it is the first time. Add checks later to create only if.
+if test -x $basedir
+then
+  echo "Working Basedir in: $basedir...."
+  echo ""
+else
+  echo "It seems this Base dir is a new one. Creating full structure under $basedir..."
+  mkdir -p $basedir
+  mkdir -p $instances
+  mkdir -p $local
+  mkdir -p $remote
+  mkdir -p $erased
+  mkdir -p $logdir
+fi
+
+# Launch the invoked command
+mh-$1 $2 $3 $4

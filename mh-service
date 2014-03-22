@@ -1,0 +1,49 @@
+#!/usr/bin/bash
+echo " "
+if [ "$1" == help ] || [ "$#" -eq 0 ]
+then
+  echo "MyHarem service - Starts, Stops or Installs a deployed instance"
+  echo "============================="
+  echo "Usage: mh service start|stop|install|status  [<id>]"
+  echo " "
+  exit
+fi
+
+command=$1
+id=$2
+
+if [ $command == list ]
+then
+  echo " "
+  echo "List of MyHarem instances available:"
+  echo "--------------------------------------"
+  ls -l $instances/ | grep "^drw" | awk '{print $9}'
+  echo " "
+  echo "Status of the instances:"
+  echo "--------------------------------------"
+  ps -ef | grep "bin/mysqld " |  awk -F "/bin/mysqld " '{print $1}' | awk -F"$instances" '{print $2" [started]"}' | grep -v "^ \[started\]"
+  exit
+fi
+
+if [ $command == status ]
+then
+  echo "Instances that are running:"
+  echo "--------------------------------------"
+  ps -ef | grep "bin/mysqld " |  awk '{print $8"    pid:"$2}' | grep -v grep | awk -F"$instances/" '{print $2}' | awk -F"/bin/mysqld" '{print $1" "$2}' |sort
+  echo " "
+  exit
+fi
+
+
+if [ $command == install ]
+then
+  echo " "
+  echo "Inizializing instance $id"
+  echo " "
+  cd $instances/$id
+  scripts/mysql_install_db --defaults-file=mh-my.cnf.$id
+  touch $logdir/$id.initialized
+  exit
+fi
+
+$instances/$id/mysql$id $command

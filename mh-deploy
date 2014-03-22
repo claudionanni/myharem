@@ -1,0 +1,146 @@
+#!/usr/bin/bash
+echo "deploy - Installs an instance with a given unique ID"
+echo " "
+
+if [ "$1" == help ] || [ "$#" -eq 0 ]
+then
+  echo "Usage: mh deploy <tar.gz>|R<n>|status [<id>]"
+  echo " "
+  echo "Examples:"
+  echo " "
+  echo "mh deploy <tar.gz> <id>   # When indicating a local tar.gz to be deployed."
+  echo " "
+  echo "mh deploy R<n> <id>   # When indicating a remote tar.gz to be downloaded and deployed."
+  echo " "
+  echo "e.g.: mh deploy R7 3306 # To download and deploy the tar.gz labeled R7 in the output of: mh show remote"
+  echo " "
+  echo "mh deploy status   # To see the list of deployed instances"
+  exit
+fi
+
+
+if [ "$1" == status ]
+then
+  echo "List of MyHarem instances deployed:"
+  echo "--------------------------------------"
+  ls -l $instances/ | grep "^drw" | awk '{print $9}' | awk -F"." '{print "["$NF"] "$0}'
+  echo " "
+  echo "Note: deployed does not mean initialized (mysql_install_db), you can do it by using: mh service install <id> "
+  echo " "
+  echo "The following list means that the initialization was at least attempted: "
+  cd $logdir
+  ls -1 *.initialized | awk -F".initialized" '{print "Initialized: ["$1"]"}'
+  exit
+fi
+
+# First argument is the .tar.gz file
+filename=$1
+echo $filename
+
+# Check if the tarball is meant to be local or remote
+# if remote wget it and continue (aka make it local)
+if [[ $filename == R* ]]
+then
+  url=`grep "^$filename" /var/opt/myharem/remote/list | awk -F"|" '{print $3}'`
+  wget -nc $url -P $local
+  #wget $filename -P $local
+  filename=$(basename "$url")
+  echo $filename
+fi
+
+
+
+cd $local
+
+# Extract the archive in current directory
+/bin/tar -zxf $filename
+
+# Get the directory name from the tar filename (IMPORTANT: to be checked if it is always alright)
+dirname=${filename/.tar.gz/}
+
+# MySQL instance id, simply identified by the TCP/IP port number
+id=$2
+
+# We uniquely identify the instance on this host with directory_name.port, so we can have multiple instances from the same binary distribution, .tar.gz
+instance_name=$dirname.$id
+
+echo "We will install $filename into $instance_name"
+
+# Rename the directory from the original name to the unique instance name.
+# In case it already exists it moves to save the current one
+if test -x $instance_name
+then
+  echo "This instance ID already exists, moving existing one to backup position..."
+  mv $instance_name $instance_name.$(date -d "today" +"%Y%m%d%H%M")
+else
+  echo "Creating new instance ID $instance_name in $instances...."
+fi
+
+# Add the id(port) to the dirname
+mv $dirname $instances/$instance_name
+
+
+# This is a working dir that will contain the custom scripts and other working files, it could be just the instance dir later.
+mkdir $id.tmp
+cd $id.tmp
+
+# Creating the custom start Client script
+echo "bin/mysql -uroot -h127.0.0.1 -P$id" > mh-cli.$instance_name
+
+# Creating the Install Database script
+echo "scripts/mysql_install_db --defaults-file=mh-my.cnf.$id" > mh-install_db.$instance_name
+
+# Creating the custom STOP MySQL script
+echo "bin/mysqladmin -uroot -h127.0.0.1 -P$id shutdown" > mh-stop.$instance_name
+
+# Creating the custom START MySQL script
+echo "cd $instances/$instance_name" >  mh-start.$instance_name
+echo "$instances/$instance_name/bin/mysqld_safe --defaults-file=$instances/$instance_name/mh-my.cnf.$id & " >>  mh-start.$instance_name
+
+# Creating the minimal custom my.cnf
+echo "[mysqld] ">>mh-my.cnf.$id
+echo "port=$id">>mh-my.cnf.$id
+echo "socket=$id.sock">>mh-my.cnf.$id
+echo "basedir=$instances/$id">>mh-my.cnf.$id
+echo "server_id=$id">>mh-my.cnf.$id
+echo "user=mysql">>mh-my.cnf.$id
+echo "innodb_file_per_table">>mh-my.cnf.$id
+echo "log_bin">>mh-my.cnf.$id
+echo "log_error=error.$id.log">>mh-my.cnf.$id
+echo "  "
+# We create a symlink because it seems that mysql.server service script will ignore other names
+ln -s mh-my.cnf.$id my.cnf
+# This is just for the symbolik links, in case we work on a deeply nested dir we offer this facility to get faster to the instances dir
+ln -s $instances/$instance_name $instances/$id
+echo "  "
+
+# Let's make the scripts executable
+chmod +x *.$instance_name
+echo "  "
+
+# Sed is a bit.....
+fullin=$instances/$instance_name
+sed "s,basedir=,basedir=$fullin,g" $fullin/support-files/mysql.server > ./mysql$id
+chmod +x ./mysql$id
+
+# And copy the scripts in the basedir
+cp * $instances/$id/
+echo "  "
+
+# Remove the temp dir
+cd ..
+rm -Rf $id.tmp
+chown -R mysql:mysql $instances/$instance_name
+echo "  "
+
+echo "Good! MySQL installed in $instances/$instance_name and linked in $instances/$id/"
+echo " "
+echo "Initializing the instance..... (running mysql_install_db script)"
+echo " "
+mh service install $id
+echo " "
+echo " Done!"
+echo " "
+
+mh deploy status
+echo "Enjoy!"

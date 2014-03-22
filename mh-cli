@@ -1,0 +1,13 @@
+#!/usr/bin/bash
+echo "cli - command line client"
+echo " "
+if [ "$1" == help ] || [ "$#" -eq 0 ]
+then
+  echo "Usage: mh cli <id>"
+  echo " "
+  exit
+fi
+
+id=$1
+cd $instances/$id
+bin/mysql --host=127.0.0.1 --port=$id --user=root
