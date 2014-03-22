@@ -1,6 +1,6 @@
 echo "Welcome to MyHarem (c)2003-2014 By Claudio Nanni"
 echo " "
-
+#now on Github
 #Read configuration file
 source /etc/myharem.conf
 export basedir
