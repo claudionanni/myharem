@@ -15,4 +15,4 @@ echo "Getting fresh list of tarballs... "
 echo " "
 wget http://myharem.mysql.name/wp-content/uploads/2014/02/mh-tarballs.txt -O /var/opt/myharem/remote/list
 #more /var/opt/myharem/remote/list
-echo "Updated list is in /var/opt/myharem/remote/list, use: mh show remote  for more information"
+echo "Updated list is in $basedir/remote/list, use: mh show remote  for more information"
