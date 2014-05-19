@@ -41,7 +41,7 @@ echo $filename
 # if remote wget it and continue (aka make it local)
 if [[ $filename == R* ]]
 then
-  url=`grep "^$filename" /var/opt/myharem/remote/list | awk -F"|" '{print $3}'`
+  url=`grep "^$filename" $basedir/remote/list | awk -F"|" '{print $3}'`
   wget -nc $url -P $local
   #wget $filename -P $local
   filename=$(basename "$url")
