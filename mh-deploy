@@ -41,7 +41,7 @@ echo $filename
 # if remote wget it and continue (aka make it local)
 if [[ $filename == R* ]]
 then
-  url=`grep "^$filename" $basedir/remote/list | awk -F"|" '{print $3}'`
+  url=`grep "^$filename" /var/opt/myharem/remote/list | awk -F"|" '{print $3}'`
   wget -nc $url -P $local
   #wget $filename -P $local
   filename=$(basename "$url")
@@ -92,10 +92,12 @@ echo "scripts/mysql_install_db --defaults-file=mh-my.cnf.$id" > mh-install_db.$i
 
 # Creating the custom STOP MySQL script
 echo "bin/mysqladmin -uroot -h127.0.0.1 -P$id shutdown" > mh-stop.$instance_name
+ln -s mh-stop.$instance_name service.stop
 
 # Creating the custom START MySQL script
 echo "cd $instances/$instance_name" >  mh-start.$instance_name
 echo "$instances/$instance_name/bin/mysqld_safe --defaults-file=$instances/$instance_name/mh-my.cnf.$id & " >>  mh-start.$instance_name
+ln -s mh-start.$instance_name service.start
 
 # Creating the minimal custom my.cnf
 echo "[mysqld] ">>mh-my.cnf.$id
