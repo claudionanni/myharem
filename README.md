@@ -23,7 +23,7 @@ Type 'mh <command>' for the syntax.
 
 EXAMPLES:
 
-To install an instace just use:
+To install an instance just use:
 
 $ mh deploy <package.tar.gz> <instance id>
 
