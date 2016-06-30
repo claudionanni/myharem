@@ -1,10 +1,8 @@
 #!/bin/bash
 
-
 ### [INTRO] ###
 echo "Welcome to MyHarem (c)2003-2014 By Claudio Nanni"
 echo " "
-
 
 ### [SET CONFIGURATION] ###
 source /etc/myharem.conf
@@ -16,18 +14,9 @@ export erased=$basedir/erased
 export logdir=$basedir/logs
 
 
-### [CHECK PARAMETERS] ###
-if [ "$#" -eq 0 ]
-then
-  echo "MyHarem - available commands:"
-  echo "============================="
-  ls -1 $0-* | awk -F"-" '{print $1" "$2}'
-  exit
-fi
-
 ### [SETUP IF FIRST INVOCATION USING 'basedir'] ###
 # Create structure in case it is the first time. Add checks later to create only if.
-if test -x $basedir
+if [ -d "$basedir" ];
 then
   echo "Working Basedir in: $basedir...."
   echo ""
@@ -39,8 +28,17 @@ else
   mkdir -p $remote
   mkdir -p $erased
   mkdir -p $logdir
+  echo " "
 fi
 
+### [CHECK PARAMETERS] ###
+if [ "$#" -eq 0 ]
+then
+  echo "MyHarem - available commands:"
+  echo "============================="
+  ls -1 $0-* | awk -F"-" '{print $1" "$2}'
+  exit
+fi
 
 ### [LAUNCH COMMAND WITH PARAMETERS. NOW ONLY MAX THREE CONTEMPLATED] ###
 mh-$1 $2 $3 $4
