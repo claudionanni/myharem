@@ -1,0 +1,71 @@
+STEM_ID=$1
+INST_STEP=10000
+WSREP_STEP=1000
+SST_STEP=2000
+
+INST_1=$(($STEM_ID+$INST_STEP*0))
+INST_2=$(($STEM_ID+$INST_STEP*1))
+INST_3=$(($STEM_ID+$INST_STEP*2))
+
+WSREP_INST_1=$(($INST_1+$WSREP_STEP))
+WSREP_INST_2=$(($INST_2+$WSREP_STEP))
+WSREP_INST_3=$(($INST_3+$WSREP_STEP))
+
+
+### wsrep_provider_options='ist.recv_addr=10.1.1.10:8888;'   this port is the wsrep replication port + 1, not mandatory to define it
+
+clear
+echo "     "
+echo "     "
+echo "     "
+echo "Configuring 3 galera nodes, stem id/port for node 1: $STEM_ID"
+echo "     "
+
+for i in `seq 0 2`;
+do
+echo "INSTANCE $(($i+1)):"
+echo "==========================================="
+INST_ID=$(($STEM_ID+$i*10000))
+WSREP_PORT=$(($INST_ID+$WSREP_STEP))
+WSREP_SST_PORT=$(($INST_ID+$SST_STEP))
+
+basedir=/home/myharem/instances/$INST_ID
+datadir=$basedir/data
+log_error=error.$INST_ID.log
+port=$INST_ID
+server_id=$INST_ID
+socket=$INST_ID.sock
+wsrep_cluster_address="gcomm://"
+wsrep_cluster_address="gcomm://127.0.0.1:$WSREP_INST_1,127.0.0.1:$WSREP_INST_2,127.0.0.1:$WSREP_INST_3"
+wsrep_node_name="NODE_$INST_ID"
+wsrep_provider=/home/myharem/instances/$INST_ID/lib/libgalera_smm.so
+wsrep_provider_options="gcs.fc_limit=16;gmcast.listen_addr=tcp://127.0.0.1:$WSREP_PORT"
+wsrep_sst_receive_address=127.0.0.1:$WSREP_SST_PORT
+
+echo basedir=$basedir
+echo datadir=$datadir
+echo server_id=$server_id
+echo port=$port
+echo socket=$socket
+echo log_error=$log_error
+echo user=mysql
+echo innodb_file_per_table
+echo binlog_format=ROW
+echo log_bin
+echo log_slave_updates
+echo wsrep_on=ON
+echo wsrep_cluster_address=$wsrep_cluster_address
+echo wsrep_node_name=$wsrep_node_name
+echo wsrep_provider=$wsrep_provider
+echo wsrep_provider_options=$wsrep_provider_options
+echo wsrep_sst_receive_address=$wsrep_sst_receive_address
+echo wsrep_sst_method=mariabackup
+echo wsrep_sst_auth=sstuser:sstpwd
+
+echo "==========================================="
+echo " "
+echo " "
+
+done
+
+
