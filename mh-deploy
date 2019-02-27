@@ -147,9 +147,8 @@ echo " "
 
 mh deploy status
 
-echo "Galera configuration for three nodes:"
-echo "====================================="
+echo " "
+echo " "
 mh gconf $id
-echo "====================================="
-
+echo " "
 echo "Enjoy!"
