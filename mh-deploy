@@ -105,11 +105,13 @@ echo "[mysqld] ">>mh-my.cnf.$id
 echo "port=$id">>mh-my.cnf.$id
 echo "socket=$id.sock">>mh-my.cnf.$id
 echo "basedir=$instances/$id">>mh-my.cnf.$id
+echo "datadir=$instances/$id/data">>mh-my.cnf.$id
 echo "server_id=$id">>mh-my.cnf.$id
 echo "user=mysql">>mh-my.cnf.$id
 echo "innodb_file_per_table">>mh-my.cnf.$id
 echo "log_bin">>mh-my.cnf.$id
 echo "log_error=error.$id.log">>mh-my.cnf.$id
+echo "binlog_format=ROW">>mh-my.cnf.$id
 echo "  "
 # We create a symlink because it seems that mysql.server service script will ignore other names
 ln -s mh-my.cnf.$id my.cnf
@@ -145,10 +147,10 @@ echo " "
 echo " Done!"
 echo " "
 
-mh deploy status
+### mh deploy status
 
 echo " "
 echo " "
-mh gconf $id
+### mh gconf $id
 echo " "
 echo "Enjoy!"

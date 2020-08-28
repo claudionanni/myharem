@@ -1,0 +1,25 @@
+echo "INSTANCE $(($i+1)):"
+echo "==========================================="
+INST_ID=$(($STEM_ID+$i*10000))
+WSREP_PORT=$(($INST_ID+$WSREP_STEP))
+WSREP_SST_PORT=$(($INST_ID+$SST_STEP))
+
+wsrep_cluster_address="gcomm://"
+wsrep_cluster_address="gcomm://127.0.0.1:$WSREP_INST_1,127.0.0.1:$WSREP_INST_2,127.0.0.1:$WSREP_INST_3"
+wsrep_node_name="NODE_$INST_ID"
+wsrep_provider=/home/myharem/instances/$INST_ID/lib/libgalera_smm.so
+wsrep_provider_options="gcs.fc_limit=16;gmcast.listen_addr=tcp://127.0.0.1:$WSREP_PORT"
+wsrep_sst_receive_address=127.0.0.1:$WSREP_SST_PORT
+
+echo wsrep_on=ON
+echo wsrep_cluster_address=$wsrep_cluster_address
+echo wsrep_node_name=$wsrep_node_name
+echo wsrep_provider=$wsrep_provider
+echo wsrep_provider_options=$wsrep_provider_options
+echo wsrep_sst_receive_address=$wsrep_sst_receive_address
+echo wsrep_sst_method=mariabackup
+echo wsrep_sst_auth=sstuser:sstpwd
+
+
+
+

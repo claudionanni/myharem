@@ -1,0 +1,72 @@
+#!/usr/bin/bash
+echo "deploygalera - Installs 3 instances with a given unique ID and configures them as Galera Cluster"
+echo " "
+
+function addGaleraConf()
+{
+	local INST_ID=$1
+	local STEM_ID=$2
+
+	INST_STEP=10000
+	WSREP_STEP=1000
+	SST_STEP=2000
+
+	## I Need this static block because it's common to all nodes
+
+	INST_1=$(($STEM_ID+$INST_STEP*0))
+	INST_2=$(($STEM_ID+$INST_STEP*1))
+	INST_3=$(($STEM_ID+$INST_STEP*2))
+
+	WSREP_INST_1=$(($INST_1+$WSREP_STEP))
+	WSREP_INST_2=$(($INST_2+$WSREP_STEP))
+	WSREP_INST_3=$(($INST_3+$WSREP_STEP))
+
+	WSREP_PORT=$(($INST_ID+$WSREP_STEP))
+	WSREP_SST_PORT=$(($INST_ID+$SST_STEP))
+
+	CONFIG_FILE=/home/myharem/instances/$INST_ID/mh-my.cnf.$INST_ID
+
+	wsrep_cluster_address="gcomm://127.0.0.1:$WSREP_INST_1,127.0.0.1:$WSREP_INST_2,127.0.0.1:$WSREP_INST_3"
+	wsrep_node_name="NODE_$INST_ID"
+	wsrep_provider="/home/myharem/instances/$INST_ID/lib/libgalera_"$ENTERPRISE"smm.so"
+	wsrep_provider_options="gcs.fc_limit=16;gmcast.listen_addr=tcp://127.0.0.1:$WSREP_PORT"
+	wsrep_sst_receive_address=127.0.0.1:$WSREP_SST_PORT
+
+	cat <<EOT >> $CONFIG_FILE
+		#### GALERA SECTION - ADDED BY mh-deplogalera ####
+		wsrep_on=ON
+		#wsrep_cluster_address=gcomm://
+		wsrep_cluster_address=$wsrep_cluster_address
+		wsrep_node_name=$wsrep_node_name
+		wsrep_provider=$wsrep_provider
+		wsrep_provider_options=$wsrep_provider_options
+		wsrep_sst_receive_address=$wsrep_sst_receive_address
+		wsrep_sst_method=mariabackup
+		wsrep_sst_auth=sstuser:sstpwd
+	EOT
+}
+
+
+TARBALL=$1
+
+if echo "$TARBALL" | grep -q "enterprise"; then
+  ENTERPRISE="enterprise_"
+else
+  ENTERPRISE=""
+fi
+
+STEM_ID=$2
+INST_STEP=10000
+WSREP_STEP=1000
+SST_STEP=2000
+
+INST_1=$(($STEM_ID+$INST_STEP*0))
+INST_2=$(($STEM_ID+$INST_STEP*1))
+INST_3=$(($STEM_ID+$INST_STEP*2))
+
+for INSTANCE_ID in $INST_1 $INST_2 $INST_3
+do
+        echo "Installing Galera Node with ID $INSTANCE_ID"
+        mh deploy $1 $INSTANCE_ID
+        addGaleraConf $INSTANCE_ID $STEM_ID
+done
