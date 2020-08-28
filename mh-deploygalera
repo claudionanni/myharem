@@ -23,6 +23,14 @@ function addGaleraConf()
 
 	WSREP_PORT=$(($INST_ID+$WSREP_STEP))
 	WSREP_SST_PORT=$(($INST_ID+$SST_STEP))
+        echo "-"        
+	echo "The Instance will use ports: $INST_ID, $WSREP_PORT, $WSREP_SST_PORT"
+	echo "Make sure they are not used by other processes."
+        echo "------------------------------------------------------------"        
+	echo "      "
+        echo " -- FINISHED -- "
+	echo "      "
+	echo "      "
 
 	CONFIG_FILE=/home/myharem/instances/$INST_ID/mh-my.cnf.$INST_ID
 
@@ -32,18 +40,18 @@ function addGaleraConf()
 	wsrep_provider_options="gcs.fc_limit=16;gmcast.listen_addr=tcp://127.0.0.1:$WSREP_PORT"
 	wsrep_sst_receive_address=127.0.0.1:$WSREP_SST_PORT
 
-	cat <<EOT >> $CONFIG_FILE
-		#### GALERA SECTION - ADDED BY mh-deplogalera ####
-		wsrep_on=ON
-		#wsrep_cluster_address=gcomm://
-		wsrep_cluster_address=$wsrep_cluster_address
-		wsrep_node_name=$wsrep_node_name
-		wsrep_provider=$wsrep_provider
-		wsrep_provider_options=$wsrep_provider_options
-		wsrep_sst_receive_address=$wsrep_sst_receive_address
-		wsrep_sst_method=mariabackup
-		wsrep_sst_auth=sstuser:sstpwd
-	EOT
+cat <<EOT >> $CONFIG_FILE
+#### GALERA SECTION - ADDED BY mh-deplogalera ####
+wsrep_on=ON
+#wsrep_cluster_address=gcomm://
+wsrep_cluster_address=$wsrep_cluster_address
+wsrep_node_name=$wsrep_node_name
+wsrep_provider=$wsrep_provider
+wsrep_provider_options=$wsrep_provider_options
+wsrep_sst_receive_address=$wsrep_sst_receive_address
+wsrep_sst_method=mariabackup
+wsrep_sst_auth=sstuser:sstpwd
+EOT
 }
 
 
