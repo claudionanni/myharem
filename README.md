@@ -48,3 +48,21 @@ $ mh service stop 10014
 STATUS OF INSTANCES:
 
 $ mh service status
+
+
+INSTALL A 3 NODES GALERA CLUSTER:
+
+$ mh deploygalera <package.tar.gz> <first instance id>
+
+E.g.:
+
+$ mh deploy mariadb-10.1.14-linux-x86_64.tar.gz 10114
+
+Three Instances will be installed using the following ports:
+
+DB_PORT  WSREP_PORT  SST_PORT
+10114    11114       12114
+20114    21114       22114
+30114    31114       32114
+
+
