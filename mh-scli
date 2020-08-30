@@ -1,0 +1,13 @@
+#!/usr/bin/bash
+echo "root socket cli - command line client - for 10.3 & 10.4 "
+echo " "
+if [ "$1" == help ] || [ "$#" -eq 0 ]
+then
+  echo "Usage: mh cli <id>"
+  echo " "
+  exit
+fi
+
+id=$1
+cd $instances/$id
+sudo bin/mysql --socket=data/$id.sock
