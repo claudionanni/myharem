@@ -1,7 +1,7 @@
 #!/bin/bash
 
 ### [INTRO] ###
-echo "Welcome to MyHarem (c)2003-2019 By Claudio Nanni"
+echo "Welcome to MyHarem (c)2003-2020 By Claudio Nanni"
 echo " "
 
 ### [SET CONFIGURATION] ###
@@ -49,6 +49,9 @@ exit
 
 :cmd:mh-cli:
 :dsc:connect with mysql client to an instance
+
+:cmd:mh-scli:
+:dsc:connect with mysql client to an instance using root via socket
 
 :cmd:mh-deploy:
 :dsc:deploy an instance using the specified id which will also be used as server-id, tcp port, socket
