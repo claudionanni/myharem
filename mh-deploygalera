@@ -32,7 +32,7 @@ function addGaleraConf()
 	echo "      "
 	echo "      "
 
-	CONFIG_FILE=/home/myharem/instances/$INST_ID/mh-my.cnf.$INST_ID
+	CONFIG_FILE=$basedir/instances/$INST_ID/mh-my.cnf.$INST_ID
 
 	wsrep_cluster_address="gcomm://127.0.0.1:$WSREP_INST_1,127.0.0.1:$WSREP_INST_2,127.0.0.1:$WSREP_INST_3"
 	wsrep_node_name="NODE_$INST_ID"

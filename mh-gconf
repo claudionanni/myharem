@@ -29,7 +29,7 @@ INST_ID=$(($STEM_ID+$i*10000))
 WSREP_PORT=$(($INST_ID+$WSREP_STEP))
 WSREP_SST_PORT=$(($INST_ID+$SST_STEP))
 
-basedir=/home/myharem/instances/$INST_ID
+basedir=$basedir/instances/$INST_ID
 datadir=$basedir/data
 log_error=error.$INST_ID.log
 port=$INST_ID
@@ -38,7 +38,7 @@ socket=$INST_ID.sock
 wsrep_cluster_address="gcomm://"
 wsrep_cluster_address="gcomm://127.0.0.1:$WSREP_INST_1,127.0.0.1:$WSREP_INST_2,127.0.0.1:$WSREP_INST_3"
 wsrep_node_name="NODE_$INST_ID"
-wsrep_provider=/home/myharem/instances/$INST_ID/lib/libgalera_smm.so
+wsrep_provider=$basedir/instances/$INST_ID/lib/libgalera_smm.so
 wsrep_provider_options="gcs.fc_limit=16;gmcast.listen_addr=tcp://127.0.0.1:$WSREP_PORT"
 wsrep_sst_receive_address=127.0.0.1:$WSREP_SST_PORT
 
