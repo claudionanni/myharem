@@ -52,11 +52,11 @@ $ mh service status
 
 INSTALL A 3 NODES GALERA CLUSTER:
 
-$ mh deploygalera <package.tar.gz> <first instance id>
+$ mh deploygalera <package.tar.gz> \<first instance id>
 
 E.g.:
 
-$ mh deploy mariadb-10.1.14-linux-x86_64.tar.gz 10114
+$ mh deploygalera mariadb-10.1.14-linux-x86_64.tar.gz 10114
 
 Three Instances will be installed using the following ports:
 
