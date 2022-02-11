@@ -66,3 +66,12 @@ DB_PORT  WSREP_PORT  SST_PORT
 30114    31114       32114
 
 
+CONNECT TO INSTANCE:
+  
+$ mh cli <instance id>
+
+
+CONNECT TO INSTANCE USING SOCKET (MariaDB 10.3+ requires this as root):
+
+$ mh scli <instance id>
+  
