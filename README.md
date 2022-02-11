@@ -71,7 +71,7 @@ CONNECT TO INSTANCE:
 $ mh cli <instance id>
 
 
-CONNECT TO INSTANCE USING SOCKET (MariaDB 10.3+ requires this as root):
+CONNECT TO INSTANCE USING SOCKET (MariaDB 10.3+ requires this as root right after installation):
 
-$ mh scli <instance id>
+# mh scli <instance id>
   
