@@ -48,7 +48,7 @@ echo server_id=$server_id
 echo port=$port
 echo socket=$socket
 echo log_error=$log_error
-echo user=mysql
+echo user=$dbuser
 echo innodb_file_per_table
 echo binlog_format=ROW
 echo log_bin
