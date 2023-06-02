@@ -29,6 +29,7 @@ else
   mkdir -p $remote
   mkdir -p $erased
   mkdir -p $logdir
+  chown -R $dbuser:$dbuser $basedir
   echo " "
 fi
 
