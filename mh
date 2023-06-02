@@ -7,6 +7,7 @@ echo " "
 ### [SET CONFIGURATION] ###
 source /etc/myharem.conf
 export basedir
+export dbuser
 export instances=$basedir/instances
 export local=$basedir/local
 export remote=$basedir/remote

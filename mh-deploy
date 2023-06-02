@@ -107,7 +107,7 @@ echo "socket=$id.sock">>mh-my.cnf.$id
 echo "basedir=$instances/$id">>mh-my.cnf.$id
 echo "datadir=$instances/$id/data">>mh-my.cnf.$id
 echo "server_id=$id">>mh-my.cnf.$id
-echo "user=mysql">>mh-my.cnf.$id
+echo "user=$dbuser">>mh-my.cnf.$id
 echo "innodb_file_per_table">>mh-my.cnf.$id
 echo "log_bin">>mh-my.cnf.$id
 echo "log_error=error.$id.log">>mh-my.cnf.$id
@@ -135,7 +135,7 @@ echo "  "
 # Remove the temp dir
 cd ..
 rm -Rf $id.tmp
-chown -R mysql:mysql $instances/$instance_name
+chown -R $dbuser:$dbuser $instances/$instance_name
 echo "  "
 
 echo "Good! MySQL installed in $instances/$instance_name and linked in $instances/$id/"
