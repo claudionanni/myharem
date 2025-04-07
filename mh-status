@@ -14,12 +14,11 @@ echo "List of MyHarem instances deployed:"
 echo "--------------------------------------"
 ls -l $instances/ | grep "^drw" | awk '{print $9}' | awk -F"." '{print "["$NF"] "$0}'
 echo " "
-echo "Note: deployed does not mean initialized (mysql_install_db), you can do it by using: mh service install <id> "
+echo "Note: deployed does not mean initialized (mariadb_install_db), you can do it by using: mh service install <id> "
 echo " "
 echo "Instances that are running:"
 echo "--------------------------------------"
-#ps -ef | grep "bin/mysqld " |  awk '{print $2" "$8}' | awk -F"$instances" '{print $2}' | awk -F"." '{print "["$NF"] "$0" [started]"}'
-ps -ef | grep "bin/mysqld " |  awk '{print $8"    pid:"$2}' | grep -v grep | awk -F"$instances/" '{print $2}' | awk -F"/bin/mysqld" '{print $1" "$2}' |sort
+ps -ef | grep "bin/mariadbd " |  awk '{print $8"    pid:"$2}' | grep -v grep | awk -F"$instances/" '{print $2}' | awk -F"/bin/mariadbd" '{print $1" "$2}' |sort
 echo " "
 echo " "
 mh show local

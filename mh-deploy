@@ -25,7 +25,7 @@ then
   echo "--------------------------------------"
   ls -l $instances/ | grep "^drw" | awk '{print $9}' | awk -F"." '{print "["$NF"] "$0}'
   echo " "
-  echo "Note: deployed does not mean initialized (mysql_install_db), you can do it by using: mh service install <id> "
+  echo "Note: deployed does not mean initialized (mariadb_install_db), you can do it by using: mh service install <id> "
   echo " "
   echo "The following list means that the initialization was at least attempted: "
   cd $logdir
@@ -85,23 +85,23 @@ mkdir $id.tmp
 cd $id.tmp
 
 # Creating the custom start Client script
-echo "bin/mysql -uroot -h127.0.0.1 -P$id" > mh-cli.$instance_name
+echo "bin/mariadb -uroot -h127.0.0.1 -P$id" > mh-cli.$instance_name
 
 # Creating the Install Database script
-echo "scripts/mysql_install_db --defaults-file=mh-my.cnf.$id" > mh-install_db.$instance_name
+echo "scripts/mariadb_install_db --defaults-file=mh-my.cnf.$id" > mh-install_db.$instance_name
 
 # Creating the custom STOP MySQL script
-echo "bin/mysqladmin -uroot -h127.0.0.1 -P$id shutdown" > mh-stop.$instance_name
+echo "bin/mariadbadmin -uroot -h127.0.0.1 -P$id shutdown" > mh-stop.$instance_name
 ln -s mh-stop.$instance_name service.stop
 
 # Creating the custom START MySQL script
 echo "parameters=$1"
 echo "cd $instances/$instance_name" >  mh-start.$instance_name
-echo "$instances/$instance_name/bin/mysqld_safe --defaults-file=$instances/$instance_name/mh-my.cnf.$id $parameters& " >>  mh-start.$instance_name
+echo "$instances/$instance_name/bin/mariadbd_safe --defaults-file=$instances/$instance_name/mh-my.cnf.$id $parameters& " >>  mh-start.$instance_name
 ln -s mh-start.$instance_name service.start
 
 # Creating the minimal custom my.cnf
-echo "[mysqld] ">>mh-my.cnf.$id
+echo "[mariadbd] ">>mh-my.cnf.$id
 echo "port=$id">>mh-my.cnf.$id
 echo "socket=$id.sock">>mh-my.cnf.$id
 echo "basedir=$instances/$id">>mh-my.cnf.$id
@@ -113,7 +113,7 @@ echo "log_bin">>mh-my.cnf.$id
 echo "log_error=error.$id.log">>mh-my.cnf.$id
 echo "binlog_format=ROW">>mh-my.cnf.$id
 echo "  "
-# We create a symlink because it seems that mysql.server service script will ignore other names
+# We create a symlink because it seems that mariadb.server service script will ignore other names
 ln -s mh-my.cnf.$id my.cnf
 # This is just for the symbolik links, in case we work on a deeply nested dir we offer this facility to get faster to the instances dir
 ln -s $instances/$instance_name $instances/$id
@@ -125,8 +125,8 @@ echo "  "
 
 # Sed is a bit.....
 fullin=$instances/$instance_name
-sed "s,basedir=,basedir=$fullin,g" $fullin/support-files/mysql.server > ./mysql$id
-chmod +x ./mysql$id
+sed "s,basedir=,basedir=$fullin,g" $fullin/support-files/mariadb.server > ./mariadb$id
+chmod +x ./mariadb$id
 
 # And copy the scripts in the basedir
 cp * $instances/$id/
@@ -140,7 +140,7 @@ echo "  "
 
 echo "Good! MySQL installed in $instances/$instance_name and linked in $instances/$id/"
 echo " "
-echo "Initializing the instance..... (running mysql_install_db script)"
+echo "Initializing the instance..... (running mariadb_install_db script)"
 echo " "
 mh service install $id
 echo " "

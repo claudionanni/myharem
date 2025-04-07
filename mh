@@ -51,10 +51,10 @@ exit
 ### [CURRENT AVAILABLE COMMANDS] ###
 
 :cmd:mh-cli:
-:dsc:connect with mysql client to an instance
+:dsc:connect with mariadb client to an instance
 
 :cmd:mh-scli:
-:dsc:connect with mysql client to an instance using root via socket
+:dsc:connect with mariadb client to an instance using root via socket
 
 :cmd:mh-deploy:
 :dsc:deploy an instance using the specified id which will also be used as server-id, tcp port, socket

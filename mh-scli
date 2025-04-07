@@ -10,4 +10,4 @@ fi
 
 id=$1
 cd $instances/$id
-sudo bin/mysql --socket=data/$id.sock
+sudo bin/mariadb --socket=data/$id.sock

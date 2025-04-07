@@ -22,7 +22,7 @@ then
   echo " "
   echo "Status of the instances:"
   echo "--------------------------------------"
-  ps -ef | grep "bin/mysqld " |  awk -F "/bin/mysqld " '{print $1}' | awk -F"$instances" '{print $2" [started]"}' | grep -v "^ \[started\]"
+  ps -ef | grep "bin/mariadb " |  awk -F "/bin/mariadb " '{print $1}' | awk -F"$instances" '{print $2" [started]"}' | grep -v "^ \[started\]"
   exit
 fi
 
@@ -30,7 +30,7 @@ if [ $command == status ]
 then
   echo "Instances that are running:"
   echo "--------------------------------------"
-  ps -ef | grep "bin/mysqld " |  awk '{print $8"    pid:"$2}' | grep -v grep | awk -F"$instances/" '{print $2}' | awk -F"/bin/mysqld" '{print $1" "$2}' |sort
+  ps -ef | grep "bin/mariadb " |  awk '{print $8"    pid:"$2}' | grep -v grep | awk -F"$instances/" '{print $2}' | awk -F"/bin/mariadb" '{print $1" "$2}' |sort
   echo " "
   exit
 fi
@@ -42,7 +42,7 @@ then
   echo "Inizializing instance $id"
   echo " "
   cd $instances/$id
-  scripts/mysql_install_db --defaults-file=mh-my.cnf.$id
+  scripts/mariadb_install_db --defaults-file=mh-my.cnf.$id
   touch $logdir/$id.initialized
   exit
 fi

@@ -10,4 +10,4 @@ fi
 
 id=$1
 cd $instances/$id
-bin/mysql --host=127.0.0.1 --port=$id --user=root
+bin/mariadb --host=127.0.0.1 --port=$id --user=root
