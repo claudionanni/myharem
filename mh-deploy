@@ -97,7 +97,7 @@ ln -s mh-stop.$instance_name service.stop
 # Creating the custom START MySQL script
 echo "parameters=$1"
 echo "cd $instances/$instance_name" >  mh-start.$instance_name
-echo "$instances/$instance_name/bin/mariadbd_safe --defaults-file=$instances/$instance_name/mh-my.cnf.$id $parameters& " >>  mh-start.$instance_name
+echo "$instances/$instance_name/bin/mysqld_safe --defaults-file=$instances/$instance_name/mh-my.cnf.$id $parameters& " >>  mh-start.$instance_name
 ln -s mh-start.$instance_name service.start
 
 # Creating the minimal custom my.cnf
