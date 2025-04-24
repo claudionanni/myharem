@@ -125,7 +125,7 @@ echo "  "
 
 # Sed is a bit.....
 fullin=$instances/$instance_name
-sed "s,basedir=,basedir=$fullin,g" $fullin/support-files/mariadb.server > ./mariadb$id
+sed "s,basedir=,basedir=$fullin,g" $fullin/support-files/mysql.server > ./mariadb$id
 chmod +x ./mariadb$id
 
 # And copy the scripts in the basedir
