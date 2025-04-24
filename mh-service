@@ -42,7 +42,7 @@ then
   echo "Inizializing instance $id"
   echo " "
   cd $instances/$id
-  scripts/mariadb_install_db --defaults-file=mh-my.cnf.$id
+  scripts/mariadb-install-db --defaults-file=mh-my.cnf.$id
   touch $logdir/$id.initialized
   exit
 fi
