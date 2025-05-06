@@ -91,7 +91,7 @@ echo "bin/mariadb -uroot -h127.0.0.1 -P$id" > mh-cli.$instance_name
 echo "scripts/mariadb-install-db --defaults-file=mh-my.cnf.$id" > mh-install_db.$instance_name
 
 # Creating the custom STOP MySQL script
-echo "bin/mariadbadmin -uroot -h127.0.0.1 -P$id shutdown" > mh-stop.$instance_name
+echo "bin/mariadb-admin -uroot -h127.0.0.1 -P$id shutdown" > mh-stop.$instance_name
 ln -s mh-stop.$instance_name service.stop
 
 # Creating the custom START MySQL script
