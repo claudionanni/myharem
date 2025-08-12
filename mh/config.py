@@ -1,0 +1,35 @@
+import configparser
+import os
+
+def get_config():
+    """Gets the configuration from the myharem.conf file."""
+    config = configparser.ConfigParser()
+    # TODO: make the path to the config file configurable
+    config.read('/etc/myharem.conf')
+    return config
+
+def get_basedir():
+    """Gets the basedir from the configuration."""
+    config = get_config()
+    return config.get('DEFAULT', 'basedir', fallback='/var/opt/myharem')
+
+def get_dbuser():
+    """Gets the dbuser from the configuration."""
+    config = get_config()
+    return config.get('DEFAULT', 'dbuser', fallback='mysql')
+
+def setup_myharem_dirs():
+    """Sets up the necessary directories for MyHarem."""
+    basedir = get_basedir()
+
+    dirs_to_create = [
+        basedir,
+        os.path.join(basedir, 'instances'),
+        os.path.join(basedir, 'local'),
+        os.path.join(basedir, 'remote'),
+        os.path.join(basedir, 'erased'),
+        os.path.join(basedir, 'logs'),
+    ]
+
+    for d in dirs_to_create:
+        os.makedirs(d, exist_ok=True)

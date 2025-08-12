@@ -1,77 +1,83 @@
-myharem
-=======
+# MyHarem
 
-MySQL/MariaDB/Percona tool to install multiple instances on the same host, easy and quick.
+MyHarem is a Python-based tool for managing local MariaDB instances. It allows you to easily deploy single instances or multi-node Galera clusters from tarball archives.
 
+## Installation
 
-INSTALLATION:
+To install MyHarem, simply use `pip`:
 
-Copy all mh-* files under your bin directory.
+```bash
+pip install .
+```
 
-Copy etc/myharem.conf under /etc and set basedir to your preferred location, user must have privileges.
+This will install the `mh` command-line tool.
 
-Under the folder 'myharem/local' put the .tar.gz packages.
+## Configuration
 
+MyHarem uses a configuration file located at `/etc/myharem.conf`. This file specifies the base directory where MyHarem will store its data.
 
-GENERAL INSTRUCTIONS:
+Here's an example `myharem.conf`:
 
-Type 'mh' for a list of commands.
+```ini
+[DEFAULT]
+basedir = /var/opt/myharem
+dbuser = mysql
+```
 
-Type 'mh <command>' for the syntax.
+The first time you run `mh`, it will automatically create the necessary directory structure under the specified `basedir`.
 
+## Commands
 
+MyHarem provides a simple and powerful command-line interface.
 
-EXAMPLES:
+### `mh deploy <tarball> <instance_id>`
 
-To install an instance just use:
+Deploys a new single MariaDB instance.
 
-$ mh deploy <package.tar.gz> <instance id>
+*   `<tarball>`: The path to the MariaDB tarball archive.
+*   `<instance_id>`: A unique ID for the instance (e.g., a port number).
 
-E.g.:
+Example:
+```bash
+mh deploy /path/to/mariadb-10.5.9-linux-x86_64.tar.gz 10509
+```
 
-$ mh deploy mariadb-10.1.14-linux-x86_64.tar.gz 10114
+### `mh deploygalera <tarball> <first_instance_id>`
 
-To install another instance just use:
+Deploys a 3-node Galera cluster.
 
-$ mh deploy mariadb-10.1.14-linux-x86_64.tar.gz 20114
+*   `<tarball>`: The path to the MariaDB tarball archive.
+*   `<first_instance_id>`: The ID for the first node in the cluster. The other nodes will be deployed with IDs incremented by 10000.
 
+Example:
+```bash
+mh deploygalera /path/to/mariadb-10.5.9-linux-x86_64.tar.gz 10509
+```
 
-START AN INSTANCE:
+### `mh service start <instance_id>`
 
-$ mh service start 10114
+Starts a MariaDB instance.
 
-STOP AN INSTANCE:
+### `mh service stop <instance_id>`
 
-$ mh service stop 10014
+Stops a MariaDB instance.
 
+### `mh service status`
 
-STATUS OF INSTANCES:
+Shows the status of all deployed instances.
 
-$ mh service status
+### `mh scli <instance_id>`
 
+Connects to a MariaDB instance using a socket.
 
-INSTALL A 3 NODES GALERA CLUSTER:
+### `mh log <instance_id>`
 
-$ mh deploygalera <package.tar.gz> \<first instance id>
+Shows the latest log entries for an instance.
 
-E.g.:
+Options:
+*   `--lines <n>`: The number of lines to show (default: 20).
+*   `--level <level>`: Filter by log level (e.g., `ERROR`, `Warning`).
 
-$ mh deploygalera mariadb-10.1.14-linux-x86_64.tar.gz 10114
+### `mh var <variable_name>`
 
-Three Instances will be installed using the following ports:
-
-DB_PORT  WSREP_PORT  SST_PORT
-10114    11114       12114
-20114    21114       22114
-30114    31114       32114
-
-
-CONNECT TO INSTANCE:
-  
-$ mh cli <instance id>
-
-
-CONNECT TO INSTANCE USING SOCKET (MariaDB 10.3+ requires this as root right after installation):
-
-# mh scli <instance id>
-  
+Extracts a server variable from all running instances.
