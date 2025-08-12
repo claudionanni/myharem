@@ -4,8 +4,19 @@ import os
 def get_config():
     """Gets the configuration from the myharem.conf file."""
     config = configparser.ConfigParser()
-    # TODO: make the path to the config file configurable
-    config.read('/etc/myharem.conf')
+    config_path = '/etc/myharem.conf'  # TODO: make configurable
+
+    if not os.path.exists(config_path):
+        return config  # Return empty config, fallbacks will be used
+
+    with open(config_path, 'r') as f:
+        content = f.read()
+
+    # Prepend [DEFAULT] section header if it's missing to support the old format
+    if not content.strip().startswith('['):
+        content = '[DEFAULT]\n' + content
+
+    config.read_string(content)
     return config
 
 def get_basedir():
