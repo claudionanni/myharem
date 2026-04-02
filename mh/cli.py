@@ -48,6 +48,14 @@ def deployreplication(tarball, instance_id):
     replication.deploy_replication(tarball, instance_id)
 
 
+# ---------- list ----------
+
+@main.command(name='list')
+def list_command():
+    """Lists all deployed instances and their status."""
+    _list_instances()
+
+
 # ---------- service ----------
 
 @main.group(name='service')
@@ -70,9 +78,8 @@ def stop(instance_id):
     service.stop_instance(instance_id)
 
 
-@service_group.command(name='status')
-def status_command():
-    """Shows the status of all deployed instances."""
+def _list_instances():
+    """Prints a table of all deployed instances and their status."""
     instances = Instance.get_all_instances()
     if not instances:
         click.echo("No instances found.")
@@ -86,6 +93,12 @@ def status_command():
         color = 'green' if status == 'Running' else 'red'
         click.echo(f"{inst.id:<10} {dirname:<60} ", nl=False)
         click.secho(status, fg=color)
+
+
+@service_group.command(name='status')
+def status_command():
+    """Shows the status of all deployed instances."""
+    _list_instances()
 
 
 # ---------- scli / cli ----------
