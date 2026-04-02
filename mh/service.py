@@ -11,11 +11,12 @@ def start_instance(instance_id):
     instance = Instance(instance_id)
     instance._require_exists()
     instance.start()
-    # Wait briefly for instance to accept connections, then apply
-    # extra admin grants (needed for MariaDB 10.11+).
+    # Wait for instance to accept connections, then clean up init-file
+    # and apply extra admin grants (needed for MariaDB 10.11+).
     for _ in range(15):
         time.sleep(1)
         if instance.is_running():
+            deployment.cleanup_init_file(instance)
             deployment.grant_admin_extras(instance)
             break
 

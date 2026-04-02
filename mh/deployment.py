@@ -157,19 +157,16 @@ ADMIN_USER = 'myharem'
 REPL_USER = 'mh_repl'
 SST_USER = 'mh_sst'
 SST_PASSWORD = 'sstpwd'
+INIT_USERS_FILE = 'init_users.sql'
 
-BOOTSTRAP_SQL = (
-    # --bootstrap processes one SQL statement per line.
-    # Must use 'use mysql;' before DML on mysql tables.
-    "use mysql;\n"
-    # Admin user — full privileges, no password
+# SQL executed via --init-file on first instance start.
+# Uses only standard SQL that works across all MariaDB versions.
+INIT_USERS_SQL = (
     f"CREATE USER IF NOT EXISTS '{ADMIN_USER}'@'localhost';\n"
     f"GRANT ALL PRIVILEGES ON *.* TO '{ADMIN_USER}'@'localhost' "
     f"WITH GRANT OPTION;\n"
-    # Replication user — for async replication slave IO thread
     f"CREATE USER IF NOT EXISTS '{REPL_USER}'@'localhost';\n"
     f"GRANT REPLICATION SLAVE ON *.* TO '{REPL_USER}'@'localhost';\n"
-    # SST user — for Galera SST with mariabackup
     f"CREATE USER IF NOT EXISTS '{SST_USER}'@'localhost' "
     f"IDENTIFIED BY '{SST_PASSWORD}';\n"
     f"GRANT RELOAD, PROCESS, LOCK TABLES, REPLICATION CLIENT "
@@ -177,8 +174,8 @@ BOOTSTRAP_SQL = (
     f"FLUSH PRIVILEGES;\n"
 )
 
-# Grants that require a running server (MariaDB 10.11+ separated admin
-# privileges from ALL PRIVILEGES). Run after instance first start.
+# Extra grants for MariaDB 10.11+ (separated from ALL PRIVILEGES).
+# Applied after instance starts via run_sql; errors ignored for older versions.
 ADMIN_EXTRA_GRANTS = (
     f"GRANT SUPER, SHUTDOWN, REPLICATION SLAVE ADMIN "
     f"ON *.* TO '{ADMIN_USER}'@'localhost';"
@@ -186,37 +183,48 @@ ADMIN_EXTRA_GRANTS = (
 
 
 def create_admin_user(instance_path):
-    """Creates myharem service users using mysqld --bootstrap.
+    """Prepares init-file to create service users on first instance start.
 
-    Creates three users:
+    Writes SQL to init_users.sql and adds init_file directive to my.cnf.
+    Users are created automatically when the instance first starts.
+
+    Three users:
     - myharem: full admin, no password (for mh commands)
     - mh_repl: REPLICATION SLAVE privilege (for async replication)
     - mh_sst: SST privileges with password (for Galera mariabackup)
     """
     instance_path = Path(instance_path)
-    mysqld = instance_path / 'bin' / 'mariadbd'
-    if not mysqld.exists():
-        mysqld = instance_path / 'bin' / 'mysqld'
+    init_sql_path = instance_path / INIT_USERS_FILE
     my_cnf_path = instance_path / 'my.cnf'
 
-    if not mysqld.exists():
-        click.secho("Warning: could not create service users (mysqld not found)",
-                     fg='yellow')
-        return
+    init_sql_path.write_text(INIT_USERS_SQL)
 
-    click.echo("Creating service users (myharem, mh_repl, mh_sst)...")
-    process = subprocess.run(
-        [str(mysqld), f"--defaults-file={my_cnf_path}", "--bootstrap"],
-        input=BOOTSTRAP_SQL,
-        capture_output=True, text=True,
-    )
+    # Append init_file to my.cnf so the server executes it on start
+    with open(my_cnf_path, 'a') as f:
+        f.write(f"\ninit_file = {init_sql_path}\n")
 
-    if process.returncode != 0:
-        output = (process.stderr or process.stdout or '(no output)').strip()
-        click.secho(f"Warning: user creation failed:\n{output}",
-                     fg='yellow')
-    else:
-        click.secho("Service users created.", fg='green')
+    click.echo("Service users will be created on first instance start.")
+
+
+def cleanup_init_file(instance):
+    """Removes init-file config and SQL file after first successful start.
+
+    Should be called after the instance is confirmed running. Idempotent.
+    """
+    instance_path = Path(instance.path)
+    init_sql_path = instance_path / INIT_USERS_FILE
+    my_cnf_path = instance_path / 'my.cnf'
+
+    if not init_sql_path.exists():
+        return  # Already cleaned up
+
+    # Remove init_file line from my.cnf
+    content = my_cnf_path.read_text()
+    lines = [line for line in content.splitlines()
+             if not line.strip().startswith('init_file')]
+    my_cnf_path.write_text('\n'.join(lines) + '\n')
+
+    init_sql_path.unlink(missing_ok=True)
 
 
 def grant_admin_extras(instance):

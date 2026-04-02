@@ -70,10 +70,13 @@ def deploy_replication(tarball_path, master_instance_id):
 
     master.start()
     _wait_for_instance(master)
+    deployment.cleanup_init_file(master)
     deployment.grant_admin_extras(master)
 
     slave.start()
     _wait_for_instance(slave)
+    deployment.cleanup_init_file(slave)
+    deployment.grant_admin_extras(slave)
 
     # --- Configure replication ---
     click.secho("\n=== Configuring GTID Replication ===", fg='cyan', bold=True)
