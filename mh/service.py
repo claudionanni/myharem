@@ -11,12 +11,18 @@ def start_instance(instance_id):
     instance = Instance(instance_id)
     instance._require_exists()
     instance.start()
-    # Wait for socket, then create service users if first start
-    for _ in range(30):
+    # Wait for socket to appear, then give server a moment to finish
+    # initialization before creating service users.
+    click.echo(f"Waiting for instance {instance_id} to be ready...", nl=False)
+    for _ in range(60):
         time.sleep(1)
+        click.echo(".", nl=False)
         if instance.is_socket_ready():
+            time.sleep(2)  # Extra time for server to finish init
+            click.secho(" OK", fg='green')
             deployment.create_service_users(instance)
-            break
+            return
+    click.secho(" timeout", fg='yellow')
 
 
 def stop_instance(instance_id):

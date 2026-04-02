@@ -178,7 +178,7 @@ ADMIN_EXTRA_GRANTS = (
 )
 
 
-def create_service_users(instance):
+def create_service_users(instance, retries=5):
     """Creates service users on a running instance by connecting as root.
 
     Connects via socket as the OS root user (requires sudo) and creates:
@@ -190,6 +190,7 @@ def create_service_users(instance):
 
     Args:
         instance: A running Instance object.
+        retries: Number of connection retries (server may still be initializing).
     """
     mariadb = instance.path / 'bin' / 'mariadb'
     if not mariadb.exists():
@@ -208,15 +209,19 @@ def create_service_users(instance):
 
     click.echo("Creating service users (myharem, mh_repl, mh_sst)...")
 
-    # Connect as root via socket (works because mh runs with sudo)
+    # Retry loop — socket may exist before server is fully ready
     cmd = [
         str(mariadb), '-uroot',
         f'--socket={instance.socket_path}',
         '-B', '-e', CREATE_USERS_SQL,
     ]
-    process = subprocess.run(cmd, capture_output=True, text=True)
-
-    if process.returncode != 0:
+    for attempt in range(retries):
+        process = subprocess.run(cmd, capture_output=True, text=True)
+        if process.returncode == 0:
+            break
+        if attempt < retries - 1:
+            time.sleep(2)
+    else:
         output = (process.stderr or process.stdout or '(no output)').strip()
         click.secho(f"Warning: user creation failed:\n{output}", fg='yellow')
         return
