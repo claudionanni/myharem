@@ -1,6 +1,7 @@
 import configparser
 import os
 import shutil
+import subprocess
 from pathlib import Path
 
 import click
@@ -58,19 +59,30 @@ def setup_myharem_dirs():
     for d in dirs_to_create:
         d.mkdir(parents=True, exist_ok=True)
 
-    _chown_tree(basedir)
+    # Only chown the top-level dirs, not the entire tree
+    _chown_dirs(dirs_to_create)
 
 
-def _chown_tree(path):
-    """Changes ownership of the directory tree to the configured dbuser."""
+def _chown_dirs(paths):
+    """Changes ownership of specific directories (non-recursive)."""
     dbuser = get_dbuser()
     try:
-        shutil.chown(str(path), user=dbuser, group=dbuser)
-        for root, dirs, files in os.walk(path):
-            for d in dirs:
-                shutil.chown(os.path.join(root, d), user=dbuser, group=dbuser)
-            for f in files:
-                shutil.chown(os.path.join(root, f), user=dbuser, group=dbuser)
+        for p in paths:
+            shutil.chown(str(p), user=dbuser, group=dbuser)
     except (PermissionError, LookupError):
-        # Non-root users or unknown user — skip silently
+        pass
+
+
+def chown_instance(path):
+    """Changes ownership of an instance directory tree to dbuser.
+
+    Uses system chown -R for performance on large directory trees.
+    """
+    dbuser = get_dbuser()
+    try:
+        subprocess.run(
+            ['chown', '-R', f'{dbuser}:{dbuser}', str(path)],
+            capture_output=True, timeout=60,
+        )
+    except (PermissionError, FileNotFoundError, subprocess.TimeoutExpired):
         pass

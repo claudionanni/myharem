@@ -1,5 +1,6 @@
 import os
 import subprocess
+import time
 from pathlib import Path
 
 import click
@@ -41,6 +42,7 @@ def deploy_instance(tarball_path, instance_id, init_db=True):
     Returns:
         The path to the new instance directory (Path object).
     """
+    t0 = time.time()
     tarball_path = resolve_tarball(tarball_path)
 
     basedir = config.get_basedir()
@@ -50,10 +52,11 @@ def deploy_instance(tarball_path, instance_id, init_db=True):
     instance_name = f"{dirname}.{instance_id}"
     instance_path = instances_dir / instance_name
 
-    click.echo(f"Creating instance directory: {instance_path}")
+    click.echo(f"[1/4] Creating instance directory: {instance_name}")
     instance_path.mkdir(parents=True, exist_ok=True)
 
-    click.echo(f"Extracting {tarball_path.name} to {instance_path}")
+    click.echo(f"[2/4] Extracting {tarball_path.name}...")
+    t1 = time.time()
     process = subprocess.run(
         ['tar', '-zxf', str(tarball_path), '--strip-components=1',
          '-C', str(instance_path)],
@@ -63,12 +66,19 @@ def deploy_instance(tarball_path, instance_id, init_db=True):
         raise click.ClickException(
             f"Failed to extract tarball:\n{process.stderr}"
         )
+    click.echo(f"       Extracted in {time.time() - t1:.1f}s")
 
     if init_db:
+        click.echo(f"[3/4] Generating my.cnf...")
         _generate_my_cnf(instance_id, instance_path)
+        click.echo(f"[4/4] Initializing database...")
         initialize_database(instance_path)
+    else:
+        click.echo(f"[3/4] Skipping my.cnf (custom config will be applied)")
+        click.echo(f"[4/4] Skipping database init (will be done after config)")
 
-    config._chown_tree(instance_path)
+    config.chown_instance(instance_path)
+    click.echo(f"  Instance {instance_id} deployed in {time.time() - t0:.1f}s")
     return instance_path
 
 
