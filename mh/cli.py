@@ -203,6 +203,46 @@ def show():
     pass
 
 
+# ---------- update ----------
+
+@main.command()
+def update():
+    """Updates MyHarem from the GitHub repository."""
+    import subprocess
+    import tempfile
+
+    repo_url = "https://github.com/claudionanni/myharem.git"
+    branch = "feature/python-refactor-and-new-features"
+
+    click.echo(f"Updating MyHarem from {repo_url} ({branch})...")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Clone the repo
+        click.echo("Cloning repository...")
+        result = subprocess.run(
+            ['git', 'clone', '--depth=1', '--branch', branch,
+             repo_url, tmpdir],
+            capture_output=True, text=True,
+        )
+        if result.returncode != 0:
+            raise click.ClickException(
+                f"Failed to clone repository:\n{result.stderr}"
+            )
+
+        # Install with --force-reinstall
+        click.echo("Installing...")
+        result = subprocess.run(
+            ['pip', 'install', '--force-reinstall', '--no-deps', '.'],
+            capture_output=True, text=True, cwd=tmpdir,
+        )
+        if result.returncode != 0:
+            raise click.ClickException(
+                f"Failed to install:\n{result.stderr}"
+            )
+
+    click.secho("MyHarem updated successfully!", fg='green')
+
+
 @show.command(name='local')
 def show_local():
     """Lists locally available tarballs."""

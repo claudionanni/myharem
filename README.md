@@ -4,13 +4,24 @@ MyHarem is a Python-based tool for managing local MariaDB instances. It allows y
 
 ## Installation
 
-To install MyHarem, simply use `pip`:
+To install MyHarem:
 
 ```bash
-pip install .
+sudo pip install .
 ```
 
 This will install the `mh` command-line tool.
+
+> **Note:** When updating from a local checkout, pip may not detect changes if the version number hasn't changed. Use `--force-reinstall` to ensure the latest code is installed:
+> ```bash
+> sudo pip install --force-reinstall --no-deps .
+> ```
+
+Alternatively, use the built-in update command to pull and install the latest version directly from GitHub:
+
+```bash
+sudo mh update
+```
 
 ## Configuration
 
@@ -110,3 +121,11 @@ Lists locally available tarballs in the `local/` directory.
 ### `mh show remote`
 
 Lists remotely available tarballs from a previously fetched list.
+
+### `mh update`
+
+Updates MyHarem to the latest version from the GitHub repository. Clones the repo and reinstalls with `--force-reinstall`.
+
+```bash
+sudo mh update
+```
