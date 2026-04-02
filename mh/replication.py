@@ -109,6 +109,9 @@ def deploy_replication(tarball_path, master_instance_id):
 def _wait_for_instance(instance, timeout=WAIT_TIMEOUT):
     """Waits for an instance to become ready.
 
+    Uses socket file existence as the readiness indicator, which works
+    even before service users are created (first start).
+
     Args:
         instance: Instance object to wait for.
         timeout: Maximum seconds to wait.
@@ -116,7 +119,7 @@ def _wait_for_instance(instance, timeout=WAIT_TIMEOUT):
     click.echo(f"Waiting for instance {instance.id} to be ready...", nl=False)
     elapsed = 0
     while elapsed < timeout:
-        if instance.is_running():
+        if instance.is_socket_ready():
             click.secho(" OK", fg='green')
             return
         click.echo(".", nl=False)

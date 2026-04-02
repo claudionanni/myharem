@@ -150,6 +150,14 @@ class Instance:
     def is_running(self):
         return self.get_status() == "Running"
 
+    def is_socket_ready(self):
+        """Checks if the instance socket file exists (server accepting connections).
+
+        Unlike is_running(), this doesn't require any user authentication,
+        making it safe to use before service users are created.
+        """
+        return self.socket_path.exists()
+
     def run_sql(self, sql, timeout=10):
         """Executes a SQL statement and returns the output.
 

@@ -11,10 +11,10 @@ def start_instance(instance_id):
     instance = Instance(instance_id)
     instance._require_exists()
     instance.start()
-    # Wait for instance, then create service users if first start
-    for _ in range(15):
+    # Wait for socket, then create service users if first start
+    for _ in range(30):
         time.sleep(1)
-        if instance.is_running():
+        if instance.is_socket_ready():
             deployment.create_service_users(instance)
             break
 
