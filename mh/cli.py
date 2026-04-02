@@ -79,20 +79,29 @@ def stop(instance_id):
 
 
 def _list_instances():
-    """Prints a table of all deployed instances and their status."""
+    """Prints a table of all deployed instances grouped by tarball version."""
     instances = Instance.get_all_instances()
     if not instances:
         click.echo("No instances found.")
         return
 
-    click.echo(f"{'ID':<10} {'Directory':<60} {'Status':<10}")
-    click.echo("-" * 80)
+    # Group by base directory name (tarball version)
+    from collections import defaultdict
+    groups = defaultdict(list)
     for inst in instances:
-        dirname = os.path.basename(inst.path) if inst.path else "?"
-        status = inst.get_status()
-        color = 'green' if status == 'Running' else 'red'
-        click.echo(f"{inst.id:<10} {dirname:<60} ", nl=False)
-        click.secho(status, fg=color)
+        dirname = os.path.basename(inst.path) if inst.path else "unknown"
+        # Base name is everything before the last dot (instance ID)
+        base = dirname.rsplit('.', 1)[0] if '.' in dirname else dirname
+        groups[base].append(inst)
+
+    # Sort groups by name, instances within each group by ID
+    for base in sorted(groups):
+        click.secho(f"\n  {base}", bold=True)
+        for inst in sorted(groups[base], key=lambda i: int(i.id)):
+            status = inst.get_status()
+            color = 'green' if status == 'Running' else 'red'
+            click.echo(f"    {inst.id:<10} ", nl=False)
+            click.secho(status, fg=color)
 
 
 @service_group.command(name='status')
