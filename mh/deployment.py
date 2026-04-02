@@ -1,6 +1,5 @@
 import os
 import subprocess
-import tarfile
 from pathlib import Path
 
 import click
@@ -54,16 +53,16 @@ def deploy_instance(tarball_path, instance_id, init_db=True):
     click.echo(f"Creating instance directory: {instance_path}")
     instance_path.mkdir(parents=True, exist_ok=True)
 
-    click.echo(f"Extracting {tarball_path} to {instance_path}")
-    with tarfile.open(tarball_path, 'r:gz') as tar:
-        # Strip the top-level directory (equivalent to tar --strip-components=1)
-        members = tar.getmembers()
-        root_dir = members[0].name.split('/')[0]
-        for member in members:
-            if member.path.startswith(root_dir + '/'):
-                member.path = member.path[len(root_dir) + 1:]
-                if member.path:
-                    tar.extract(member, path=instance_path)
+    click.echo(f"Extracting {tarball_path.name} to {instance_path}")
+    process = subprocess.run(
+        ['tar', '-zxf', str(tarball_path), '--strip-components=1',
+         '-C', str(instance_path)],
+        capture_output=True, text=True,
+    )
+    if process.returncode != 0:
+        raise click.ClickException(
+            f"Failed to extract tarball:\n{process.stderr}"
+        )
 
     if init_db:
         _generate_my_cnf(instance_id, instance_path)
