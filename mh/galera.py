@@ -47,7 +47,6 @@ def deploy_cluster(tarball_path, first_instance_id):
         )
 
         deployment.initialize_database(instance_path)
-        deployment.create_admin_user(instance_path)
 
     click.secho("Galera cluster deployed successfully.", fg='green')
     click.echo(f"Node IDs: {', '.join(str(n) for n in node_ids)}")
@@ -55,6 +54,7 @@ def deploy_cluster(tarball_path, first_instance_id):
         "Start the bootstrap node first with: "
         f"mh service start {node_ids[0]}"
     )
+    click.echo("Service users will be created automatically on first start.")
 
 
 def _find_galera_lib(instance_path):

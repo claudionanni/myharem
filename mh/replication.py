@@ -42,7 +42,6 @@ def deploy_replication(tarball_path, master_instance_id):
     deployment._generate_my_cnf(str(master_id), master_path,
                                 extra_config=master_extra)
     deployment.initialize_database(master_path)
-    deployment.create_admin_user(master_path)
 
     # --- Deploy slave ---
     click.secho("\n=== Deploying Slave ===", fg='cyan', bold=True)
@@ -60,7 +59,6 @@ def deploy_replication(tarball_path, master_instance_id):
     deployment._generate_my_cnf(str(slave_id), slave_path,
                                 extra_config=slave_extra)
     deployment.initialize_database(slave_path)
-    deployment.create_admin_user(slave_path)
 
     # --- Start both instances ---
     click.secho("\n=== Starting Instances ===", fg='cyan', bold=True)
@@ -70,13 +68,11 @@ def deploy_replication(tarball_path, master_instance_id):
 
     master.start()
     _wait_for_instance(master)
-    deployment.cleanup_init_file(master)
-    deployment.grant_admin_extras(master)
+    deployment.create_service_users(master)
 
     slave.start()
     _wait_for_instance(slave)
-    deployment.cleanup_init_file(slave)
-    deployment.grant_admin_extras(slave)
+    deployment.create_service_users(slave)
 
     # --- Configure replication ---
     click.secho("\n=== Configuring GTID Replication ===", fg='cyan', bold=True)

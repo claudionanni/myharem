@@ -73,7 +73,6 @@ def deploy_instance(tarball_path, instance_id, init_db=True):
         _generate_my_cnf(instance_id, instance_path)
         click.echo(f"[4/4] Initializing database...")
         initialize_database(instance_path)
-        create_admin_user(instance_path)
     else:
         click.echo(f"[3/4] Skipping my.cnf (custom config will be applied)")
         click.echo(f"[4/4] Skipping database init (will be done after config)")
@@ -157,11 +156,9 @@ ADMIN_USER = 'myharem'
 REPL_USER = 'mh_repl'
 SST_USER = 'mh_sst'
 SST_PASSWORD = 'sstpwd'
-INIT_USERS_FILE = 'init_users.sql'
 
-# SQL executed via --init-file on first instance start.
-# Uses only standard SQL that works across all MariaDB versions.
-INIT_USERS_SQL = (
+# All user creation SQL. Executed as root on a running instance.
+CREATE_USERS_SQL = (
     f"CREATE USER IF NOT EXISTS '{ADMIN_USER}'@'localhost';\n"
     f"GRANT ALL PRIVILEGES ON *.* TO '{ADMIN_USER}'@'localhost' "
     f"WITH GRANT OPTION;\n"
@@ -175,68 +172,62 @@ INIT_USERS_SQL = (
 )
 
 # Extra grants for MariaDB 10.11+ (separated from ALL PRIVILEGES).
-# Applied after instance starts via run_sql; errors ignored for older versions.
 ADMIN_EXTRA_GRANTS = (
     f"GRANT SUPER, SHUTDOWN, REPLICATION SLAVE ADMIN "
     f"ON *.* TO '{ADMIN_USER}'@'localhost';"
 )
 
 
-def create_admin_user(instance_path):
-    """Prepares init-file to create service users on first instance start.
+def create_service_users(instance):
+    """Creates service users on a running instance by connecting as root.
 
-    Writes SQL to init_users.sql and adds init_file directive to my.cnf.
-    Users are created automatically when the instance first starts.
-
-    Three users:
+    Connects via socket as the OS root user (requires sudo) and creates:
     - myharem: full admin, no password (for mh commands)
     - mh_repl: REPLICATION SLAVE privilege (for async replication)
     - mh_sst: SST privileges with password (for Galera mariabackup)
+
+    Idempotent — skips silently if users already exist.
+
+    Args:
+        instance: A running Instance object.
     """
-    instance_path = Path(instance_path)
-    init_sql_path = instance_path / INIT_USERS_FILE
-    my_cnf_path = instance_path / 'my.cnf'
+    mariadb = instance.path / 'bin' / 'mariadb'
+    if not mariadb.exists():
+        mariadb = instance.path / 'bin' / 'mysql'
 
-    init_sql_path.write_text(INIT_USERS_SQL)
+    # Check if myharem user already exists (skip if so)
+    check_cmd = [
+        str(mariadb), '-uroot',
+        f'--socket={instance.socket_path}',
+        '-B', '-N', '-e',
+        f"SELECT 1 FROM mysql.user WHERE User='{ADMIN_USER}' LIMIT 1",
+    ]
+    check = subprocess.run(check_cmd, capture_output=True, text=True)
+    if check.returncode == 0 and check.stdout.strip() == '1':
+        return  # Users already exist
 
-    # Append init_file to my.cnf so the server executes it on start
-    with open(my_cnf_path, 'a') as f:
-        f.write(f"\ninit_file = {init_sql_path}\n")
+    click.echo("Creating service users (myharem, mh_repl, mh_sst)...")
 
-    click.echo("Service users will be created on first instance start.")
+    # Connect as root via socket (works because mh runs with sudo)
+    cmd = [
+        str(mariadb), '-uroot',
+        f'--socket={instance.socket_path}',
+        '-B', '-e', CREATE_USERS_SQL,
+    ]
+    process = subprocess.run(cmd, capture_output=True, text=True)
 
+    if process.returncode != 0:
+        output = (process.stderr or process.stdout or '(no output)').strip()
+        click.secho(f"Warning: user creation failed:\n{output}", fg='yellow')
+        return
 
-def cleanup_init_file(instance):
-    """Removes init-file config and SQL file after first successful start.
+    # Apply extra admin grants for MariaDB 10.11+
+    cmd_extra = [
+        str(mariadb), '-uroot',
+        f'--socket={instance.socket_path}',
+        '-B', '-e', ADMIN_EXTRA_GRANTS,
+    ]
+    subprocess.run(cmd_extra, capture_output=True, text=True)
+    # Ignore errors — older versions don't have these privilege names
 
-    Should be called after the instance is confirmed running. Idempotent.
-    """
-    instance_path = Path(instance.path)
-    init_sql_path = instance_path / INIT_USERS_FILE
-    my_cnf_path = instance_path / 'my.cnf'
-
-    if not init_sql_path.exists():
-        return  # Already cleaned up
-
-    # Remove init_file line from my.cnf
-    content = my_cnf_path.read_text()
-    lines = [line for line in content.splitlines()
-             if not line.strip().startswith('init_file')]
-    my_cnf_path.write_text('\n'.join(lines) + '\n')
-
-    init_sql_path.unlink(missing_ok=True)
-
-
-def grant_admin_extras(instance):
-    """Applies additional admin grants that require a running server.
-
-    MariaDB 10.11+ separates SHUTDOWN, REPLICATION SLAVE ADMIN, etc.
-    from ALL PRIVILEGES. This must be run after the instance starts.
-    Idempotent — safe to call multiple times.
-    """
-    try:
-        instance.run_sql(ADMIN_EXTRA_GRANTS)
-    except Exception:
-        # May fail on older MariaDB without these privilege names —
-        # that's fine, ALL PRIVILEGES already covers them.
-        pass
+    click.secho("Service users created.", fg='green')
