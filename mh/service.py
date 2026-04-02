@@ -1,5 +1,8 @@
+import time
+
 import click
 
+from . import deployment
 from .instance import Instance
 
 
@@ -8,6 +11,13 @@ def start_instance(instance_id):
     instance = Instance(instance_id)
     instance._require_exists()
     instance.start()
+    # Wait briefly for instance to accept connections, then apply
+    # extra admin grants (needed for MariaDB 10.11+).
+    for _ in range(15):
+        time.sleep(1)
+        if instance.is_running():
+            deployment.grant_admin_extras(instance)
+            break
 
 
 def stop_instance(instance_id):

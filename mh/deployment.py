@@ -159,18 +159,13 @@ SST_USER = 'mh_sst'
 SST_PASSWORD = 'sstpwd'
 
 BOOTSTRAP_SQL = (
-    # Admin user — full privileges, no password, socket+TCP
-    # Note: on MariaDB 10.11+ some admin privileges (SHUTDOWN,
-    # REPLICATION SLAVE ADMIN, etc.) are separated from ALL PRIVILEGES.
-    # --bootstrap doesn't support all newer privilege names, so we insert
-    # the is_superuser flag directly into the privilege table to ensure
-    # the admin user has truly everything.
+    # --bootstrap processes one SQL statement per line.
+    # Must use 'use mysql;' before DML on mysql tables.
+    "use mysql;\n"
+    # Admin user — full privileges, no password
     f"CREATE USER IF NOT EXISTS '{ADMIN_USER}'@'localhost';\n"
     f"GRANT ALL PRIVILEGES ON *.* TO '{ADMIN_USER}'@'localhost' "
     f"WITH GRANT OPTION;\n"
-    f"UPDATE mysql.global_priv SET priv=JSON_SET(priv, "
-    f"'$.is_superuser', true, '$.access', 1073741823) "
-    f"WHERE User='{ADMIN_USER}';\n"
     # Replication user — for async replication slave IO thread
     f"CREATE USER IF NOT EXISTS '{REPL_USER}'@'localhost';\n"
     f"GRANT REPLICATION SLAVE ON *.* TO '{REPL_USER}'@'localhost';\n"
@@ -180,6 +175,13 @@ BOOTSTRAP_SQL = (
     f"GRANT RELOAD, PROCESS, LOCK TABLES, REPLICATION CLIENT "
     f"ON *.* TO '{SST_USER}'@'localhost';\n"
     f"FLUSH PRIVILEGES;\n"
+)
+
+# Grants that require a running server (MariaDB 10.11+ separated admin
+# privileges from ALL PRIVILEGES). Run after instance first start.
+ADMIN_EXTRA_GRANTS = (
+    f"GRANT SUPER, SHUTDOWN, REPLICATION SLAVE ADMIN "
+    f"ON *.* TO '{ADMIN_USER}'@'localhost';"
 )
 
 
@@ -210,7 +212,23 @@ def create_admin_user(instance_path):
     )
 
     if process.returncode != 0:
-        click.secho(f"Warning: user creation failed:\n{process.stderr}",
+        output = (process.stderr or process.stdout or '(no output)').strip()
+        click.secho(f"Warning: user creation failed:\n{output}",
                      fg='yellow')
     else:
         click.secho("Service users created.", fg='green')
+
+
+def grant_admin_extras(instance):
+    """Applies additional admin grants that require a running server.
+
+    MariaDB 10.11+ separates SHUTDOWN, REPLICATION SLAVE ADMIN, etc.
+    from ALL PRIVILEGES. This must be run after the instance starts.
+    Idempotent — safe to call multiple times.
+    """
+    try:
+        instance.run_sql(ADMIN_EXTRA_GRANTS)
+    except Exception:
+        # May fail on older MariaDB without these privilege names —
+        # that's fine, ALL PRIVILEGES already covers them.
+        pass

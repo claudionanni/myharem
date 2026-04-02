@@ -70,6 +70,7 @@ def deploy_replication(tarball_path, master_instance_id):
 
     master.start()
     _wait_for_instance(master)
+    deployment.grant_admin_extras(master)
 
     slave.start()
     _wait_for_instance(slave)
