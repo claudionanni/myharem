@@ -19,12 +19,91 @@ def main():
 # ---------- deploy ----------
 
 @main.command()
-@click.argument('tarball')
-@click.argument('instance_id')
+@click.argument('tarball', required=False)
+@click.argument('instance_id', required=False)
 def deploy(tarball, instance_id):
-    """Deploys a new MariaDB instance."""
-    click.echo(f"Deploying {tarball} as instance {instance_id}")
-    deployment.deploy_instance(tarball, instance_id)
+    """Deploys a new MariaDB instance (interactive if no args given)."""
+    if tarball and instance_id:
+        click.echo(f"Deploying {tarball} as instance {instance_id}")
+        deployment.deploy_instance(tarball, instance_id)
+        return
+
+    # --- Interactive wizard ---
+    _deploy_wizard()
+
+
+def _deploy_wizard():
+    """Interactive deployment wizard: pick tarball, type, and instance ID."""
+    from . import replication
+
+    # 1. Pick tarball from local/
+    local_dir = config.get_basedir() / 'local'
+    if not local_dir.exists():
+        raise click.ClickException(
+            f"No local tarball directory found at {local_dir}"
+        )
+    tarballs = sorted(local_dir.glob('*.tar.gz'))
+    if not tarballs:
+        raise click.ClickException("No tarballs found in local/")
+
+    click.echo("\nAvailable tarballs:")
+    for i, t in enumerate(tarballs, 1):
+        click.echo(f"  [{i}] {t.name}")
+
+    choice = click.prompt("\nSelect tarball", type=click.IntRange(1, len(tarballs)))
+    tarball = tarballs[choice - 1]
+    click.echo(f"  → {tarball.name}")
+
+    # 2. Pick deployment type
+    deploy_types = ['single', 'replica', 'galera']
+    click.echo("\nDeployment type:")
+    for i, dt in enumerate(deploy_types, 1):
+        if dt == 'single':
+            click.echo(f"  [{i}] Single instance")
+        elif dt == 'replica':
+            click.echo(f"  [{i}] Async replication (master + slave)")
+        elif dt == 'galera':
+            click.echo(f"  [{i}] Galera cluster (3 nodes)")
+
+    dtype_choice = click.prompt(
+        "\nSelect type", type=click.IntRange(1, len(deploy_types))
+    )
+    deploy_type = deploy_types[dtype_choice - 1]
+
+    # 3. Pick instance ID
+    instance_id = click.prompt("\nInstance ID (base port)", type=int)
+
+    # 4. Check for ID conflicts
+    existing = {inst.id for inst in Instance.get_all_instances()}
+
+    if deploy_type == 'single':
+        needed_ids = [instance_id]
+    elif deploy_type == 'replica':
+        needed_ids = [instance_id, instance_id + 10000]
+    elif deploy_type == 'galera':
+        needed_ids = [instance_id, instance_id + 10000, instance_id + 20000]
+
+    conflicts = [str(nid) for nid in needed_ids if str(nid) in existing]
+    if conflicts:
+        raise click.ClickException(
+            f"Instance ID(s) already exist: {', '.join(conflicts)}"
+        )
+
+    # 5. Confirm
+    click.echo(f"\n  Tarball: {tarball.name}")
+    click.echo(f"  Type:    {deploy_type}")
+    click.echo(f"  IDs:     {', '.join(str(i) for i in needed_ids)}")
+    if not click.confirm("\nProceed?", default=True):
+        click.echo("Aborted.")
+        return
+
+    # 6. Deploy
+    if deploy_type == 'single':
+        deployment.deploy_instance(str(tarball), str(instance_id))
+    elif deploy_type == 'replica':
+        replication.deploy_replication(str(tarball), str(instance_id))
+    elif deploy_type == 'galera':
+        galera.deploy_cluster(str(tarball), str(instance_id))
 
 
 # ---------- deploygalera ----------
