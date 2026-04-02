@@ -41,20 +41,19 @@ def deploy_cluster(tarball_path, first_instance_id):
         if not instance_path:
             raise click.ClickException(f"Failed to deploy node {i+1}")
 
-        is_bootstrap_node = (i == 0)
-        _generate_galera_my_cnf(
-            instance_path, str(node_id), cluster_address, is_bootstrap_node
-        )
+        _generate_galera_my_cnf(instance_path, str(node_id), cluster_address)
 
         deployment.initialize_database(instance_path)
 
     click.secho("Galera cluster deployed successfully.", fg='green')
     click.echo(f"Node IDs: {', '.join(str(n) for n in node_ids)}")
     click.echo(
-        "Start the bootstrap node first with: "
-        f"mh service start {node_ids[0]}"
+        "\nStart the cluster:\n"
+        f"  1. sudo mh service start --bootstrap {node_ids[0]}\n"
+        f"  2. sudo mh service start {node_ids[1]}\n"
+        f"  3. sudo mh service start {node_ids[2]}"
     )
-    click.echo("Service users will be created automatically on first start.")
+    click.echo("\nService users will be created automatically on first start.")
 
 
 def _find_galera_lib(instance_path):
@@ -77,14 +76,12 @@ def _find_galera_lib(instance_path):
     return instance_path / 'lib' / 'galera' / 'libgalera_smm.so'
 
 
-def _generate_galera_my_cnf(instance_path, instance_id, cluster_address,
-                             is_bootstrap_node):
+def _generate_galera_my_cnf(instance_path, instance_id, cluster_address):
     """Generates a Galera-specific my.cnf for a cluster node."""
     instance_path = Path(instance_path)
     wsrep_port = int(instance_id) + WSREP_STEP
     sst_port = int(instance_id) + SST_STEP
 
-    final_cluster_address = "gcomm://" if is_bootstrap_node else cluster_address
     galera_lib = _find_galera_lib(instance_path)
 
     galera_config = {
@@ -95,7 +92,7 @@ def _generate_galera_my_cnf(instance_path, instance_id, cluster_address,
         "wsrep_on": "ON",
         "wsrep_provider": str(galera_lib),
         "wsrep_cluster_name": "myharem_cluster",
-        "wsrep_cluster_address": final_cluster_address,
+        "wsrep_cluster_address": cluster_address,
         "wsrep_node_name": f"NODE_{instance_id}",
         "wsrep_node_address": f"127.0.0.1:{wsrep_port}",
         "wsrep_provider_options":

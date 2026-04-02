@@ -6,11 +6,16 @@ from . import deployment
 from .instance import Instance
 
 
-def start_instance(instance_id):
-    """Starts a MariaDB instance."""
+def start_instance(instance_id, bootstrap=False):
+    """Starts a MariaDB instance.
+
+    Args:
+        instance_id: The instance ID.
+        bootstrap: If True, starts with --wsrep-new-cluster (Galera bootstrap).
+    """
     instance = Instance(instance_id)
     instance._require_exists()
-    instance.start()
+    instance.start(wsrep_new_cluster=bootstrap)
     # Wait for socket to appear, then give server a moment to finish
     # initialization before creating service users.
     click.echo(f"Waiting for instance {instance_id} to be ready...", nl=False)

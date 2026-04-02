@@ -66,9 +66,11 @@ def service_group():
 
 @service_group.command()
 @click.argument('instance_id')
-def start(instance_id):
+@click.option('--bootstrap', is_flag=True,
+              help='Galera: bootstrap a new cluster from this node.')
+def start(instance_id, bootstrap):
     """Starts a MariaDB instance."""
-    service.start_instance(instance_id)
+    service.start_instance(instance_id, bootstrap=bootstrap)
 
 
 @service_group.command()

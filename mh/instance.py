@@ -58,8 +58,13 @@ class Instance:
     def mysqld_safe_bin(self):
         return self.path / 'bin' / 'mysqld_safe'
 
-    def start(self):
-        """Starts the MariaDB instance."""
+    def start(self, wsrep_new_cluster=False):
+        """Starts the MariaDB instance.
+
+        Args:
+            wsrep_new_cluster: If True, starts with --wsrep-new-cluster
+                (Galera bootstrap — first node of a new cluster).
+        """
         self._require_exists()
 
         if not self.mysqld_safe_bin.exists():
@@ -68,9 +73,14 @@ class Instance:
             )
 
         cmd = [str(self.mysqld_safe_bin), f"--defaults-file={self.my_cnf_path}"]
+        if wsrep_new_cluster:
+            cmd.append("--wsrep-new-cluster")
         subprocess.Popen(cmd, cwd=str(self.path),
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        click.echo(f"Starting instance {self.id}...")
+        label = f"Starting instance {self.id}"
+        if wsrep_new_cluster:
+            label += " (Galera bootstrap)"
+        click.echo(f"{label}...")
 
     def stop(self):
         """Stops the MariaDB instance."""
