@@ -163,6 +163,7 @@ BOOTSTRAP_SQL = (
     f"CREATE USER IF NOT EXISTS '{ADMIN_USER}'@'localhost';\n"
     f"GRANT ALL PRIVILEGES ON *.* TO '{ADMIN_USER}'@'localhost' "
     f"WITH GRANT OPTION;\n"
+    f"GRANT SUPER ON *.* TO '{ADMIN_USER}'@'localhost';\n"
     # Replication user — for async replication slave IO thread
     f"CREATE USER IF NOT EXISTS '{REPL_USER}'@'localhost';\n"
     f"GRANT REPLICATION SLAVE ON *.* TO '{REPL_USER}'@'localhost';\n"
