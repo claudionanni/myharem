@@ -154,20 +154,34 @@ def initialize_database(instance_path):
 
 
 ADMIN_USER = 'myharem'
+REPL_USER = 'mh_repl'
+SST_USER = 'mh_sst'
+SST_PASSWORD = 'sstpwd'
 
-ADMIN_USER_SQL = (
+BOOTSTRAP_SQL = (
+    # Admin user — full privileges, no password, socket+TCP
     f"CREATE USER IF NOT EXISTS '{ADMIN_USER}'@'localhost';\n"
     f"GRANT ALL PRIVILEGES ON *.* TO '{ADMIN_USER}'@'localhost' "
     f"WITH GRANT OPTION;\n"
+    # Replication user — for async replication slave IO thread
+    f"CREATE USER IF NOT EXISTS '{REPL_USER}'@'localhost';\n"
+    f"GRANT REPLICATION SLAVE ON *.* TO '{REPL_USER}'@'localhost';\n"
+    # SST user — for Galera SST with mariabackup
+    f"CREATE USER IF NOT EXISTS '{SST_USER}'@'localhost' "
+    f"IDENTIFIED BY '{SST_PASSWORD}';\n"
+    f"GRANT RELOAD, PROCESS, LOCK TABLES, REPLICATION CLIENT "
+    f"ON *.* TO '{SST_USER}'@'localhost';\n"
     f"FLUSH PRIVILEGES;\n"
 )
 
 
 def create_admin_user(instance_path):
-    """Creates the 'myharem' admin user using mysqld --bootstrap.
+    """Creates myharem service users using mysqld --bootstrap.
 
-    This avoids needing to start the full server. The user has no password
-    and uses native auth, so no sudo is needed for socket connections.
+    Creates three users:
+    - myharem: full admin, no password (for mh commands)
+    - mh_repl: REPLICATION SLAVE privilege (for async replication)
+    - mh_sst: SST privileges with password (for Galera mariabackup)
     """
     instance_path = Path(instance_path)
     mysqld = instance_path / 'bin' / 'mariadbd'
@@ -176,19 +190,19 @@ def create_admin_user(instance_path):
     my_cnf_path = instance_path / 'my.cnf'
 
     if not mysqld.exists():
-        click.secho("Warning: could not create admin user (mysqld not found)",
+        click.secho("Warning: could not create service users (mysqld not found)",
                      fg='yellow')
         return
 
-    click.echo(f"Creating '{ADMIN_USER}' admin user...")
+    click.echo("Creating service users (myharem, mh_repl, mh_sst)...")
     process = subprocess.run(
         [str(mysqld), f"--defaults-file={my_cnf_path}", "--bootstrap"],
-        input=ADMIN_USER_SQL,
+        input=BOOTSTRAP_SQL,
         capture_output=True, text=True,
     )
 
     if process.returncode != 0:
-        click.secho(f"Warning: admin user creation failed:\n{process.stderr}",
+        click.secho(f"Warning: user creation failed:\n{process.stderr}",
                      fg='yellow')
     else:
-        click.secho(f"Admin user '{ADMIN_USER}' created.", fg='green')
+        click.secho("Service users created.", fg='green')

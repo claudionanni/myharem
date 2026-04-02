@@ -81,7 +81,7 @@ def deploy_replication(tarball_path, master_instance_id):
         "CHANGE MASTER TO "
         "MASTER_HOST='127.0.0.1', "
         f"MASTER_PORT={master_id}, "
-        f"MASTER_USER='{deployment.ADMIN_USER}', "
+        f"MASTER_USER='{deployment.REPL_USER}', "
         "MASTER_USE_GTID=slave_pos"
     )
 

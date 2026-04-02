@@ -101,7 +101,8 @@ def _generate_galera_my_cnf(instance_path, instance_id, cluster_address,
         "wsrep_provider_options":
             f"gcs.fc_limit=16;gmcast.listen_addr=tcp://127.0.0.1:{wsrep_port}",
         "wsrep_sst_receive_address": f"127.0.0.1:{sst_port}",
-        "wsrep_sst_method": "rsync",
+        "wsrep_sst_method": "mariabackup",
+        "wsrep_sst_auth": f"{deployment.SST_USER}:{deployment.SST_PASSWORD}",
     }
 
     deployment._generate_my_cnf(instance_id, instance_path,
