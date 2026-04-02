@@ -160,10 +160,17 @@ SST_PASSWORD = 'sstpwd'
 
 BOOTSTRAP_SQL = (
     # Admin user — full privileges, no password, socket+TCP
+    # Note: on MariaDB 10.11+ some admin privileges (SHUTDOWN,
+    # REPLICATION SLAVE ADMIN, etc.) are separated from ALL PRIVILEGES.
+    # --bootstrap doesn't support all newer privilege names, so we insert
+    # the is_superuser flag directly into the privilege table to ensure
+    # the admin user has truly everything.
     f"CREATE USER IF NOT EXISTS '{ADMIN_USER}'@'localhost';\n"
     f"GRANT ALL PRIVILEGES ON *.* TO '{ADMIN_USER}'@'localhost' "
     f"WITH GRANT OPTION;\n"
-    f"GRANT SUPER ON *.* TO '{ADMIN_USER}'@'localhost';\n"
+    f"UPDATE mysql.global_priv SET priv=JSON_SET(priv, "
+    f"'$.is_superuser', true, '$.access', 1073741823) "
+    f"WHERE User='{ADMIN_USER}';\n"
     # Replication user — for async replication slave IO thread
     f"CREATE USER IF NOT EXISTS '{REPL_USER}'@'localhost';\n"
     f"GRANT REPLICATION SLAVE ON *.* TO '{REPL_USER}'@'localhost';\n"
