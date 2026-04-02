@@ -8,6 +8,29 @@ import click
 from . import config
 
 
+def resolve_tarball(tarball_path):
+    """Resolves a tarball path, searching the local directory as fallback.
+
+    If the path doesn't exist as given, looks in basedir/local/.
+
+    Returns:
+        Resolved Path object.
+    """
+    path = Path(tarball_path)
+    if path.exists():
+        return path
+
+    local_path = config.get_basedir() / 'local' / path.name
+    if local_path.exists():
+        click.echo(f"Found tarball in local: {local_path}")
+        return local_path
+
+    raise click.ClickException(
+        f"Tarball not found: {tarball_path}\n"
+        f"Also checked: {local_path}"
+    )
+
+
 def deploy_instance(tarball_path, instance_id, init_db=True):
     """Deploys a new MariaDB instance.
 
@@ -19,9 +42,7 @@ def deploy_instance(tarball_path, instance_id, init_db=True):
     Returns:
         The path to the new instance directory (Path object).
     """
-    tarball_path = Path(tarball_path)
-    if not tarball_path.exists():
-        raise click.ClickException(f"Tarball not found: {tarball_path}")
+    tarball_path = resolve_tarball(tarball_path)
 
     basedir = config.get_basedir()
     instances_dir = basedir / 'instances'
