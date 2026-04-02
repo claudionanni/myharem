@@ -73,6 +73,7 @@ def deploy_instance(tarball_path, instance_id, init_db=True):
         _generate_my_cnf(instance_id, instance_path)
         click.echo(f"[4/4] Initializing database...")
         initialize_database(instance_path)
+        create_admin_user(instance_path)
     else:
         click.echo(f"[3/4] Skipping my.cnf (custom config will be applied)")
         click.echo(f"[4/4] Skipping database init (will be done after config)")
@@ -150,3 +151,44 @@ def initialize_database(instance_path):
     click.secho("Database initialized successfully.", fg='green')
     if process.stdout.strip():
         click.echo(process.stdout)
+
+
+ADMIN_USER = 'myharem'
+
+ADMIN_USER_SQL = (
+    f"CREATE USER IF NOT EXISTS '{ADMIN_USER}'@'localhost';\n"
+    f"GRANT ALL PRIVILEGES ON *.* TO '{ADMIN_USER}'@'localhost' "
+    f"WITH GRANT OPTION;\n"
+    f"FLUSH PRIVILEGES;\n"
+)
+
+
+def create_admin_user(instance_path):
+    """Creates the 'myharem' admin user using mysqld --bootstrap.
+
+    This avoids needing to start the full server. The user has no password
+    and uses native auth, so no sudo is needed for socket connections.
+    """
+    instance_path = Path(instance_path)
+    mysqld = instance_path / 'bin' / 'mariadbd'
+    if not mysqld.exists():
+        mysqld = instance_path / 'bin' / 'mysqld'
+    my_cnf_path = instance_path / 'my.cnf'
+
+    if not mysqld.exists():
+        click.secho("Warning: could not create admin user (mysqld not found)",
+                     fg='yellow')
+        return
+
+    click.echo(f"Creating '{ADMIN_USER}' admin user...")
+    process = subprocess.run(
+        [str(mysqld), f"--defaults-file={my_cnf_path}", "--bootstrap"],
+        input=ADMIN_USER_SQL,
+        capture_output=True, text=True,
+    )
+
+    if process.returncode != 0:
+        click.secho(f"Warning: admin user creation failed:\n{process.stderr}",
+                     fg='yellow')
+    else:
+        click.secho(f"Admin user '{ADMIN_USER}' created.", fg='green')

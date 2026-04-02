@@ -5,6 +5,7 @@ from pathlib import Path
 import click
 
 from . import config
+from .deployment import ADMIN_USER
 
 
 class Instance:
@@ -82,7 +83,7 @@ class Instance:
 
         cmd = [
             str(self.mariadb_admin_bin),
-            "-uroot",
+            f"-u{ADMIN_USER}",
             f"--socket={self.socket_path}",
             "shutdown",
         ]
@@ -110,7 +111,8 @@ class Instance:
 
         os.execv(
             str(self.mariadb_bin),
-            [str(self.mariadb_bin), "-uroot", f"--socket={self.socket_path}"],
+            [str(self.mariadb_bin), f"-u{ADMIN_USER}",
+             f"--socket={self.socket_path}"],
         )
 
     def cli(self):
@@ -124,7 +126,7 @@ class Instance:
 
         os.execv(
             str(self.mariadb_bin),
-            [str(self.mariadb_bin), "-uroot", "--host=127.0.0.1",
+            [str(self.mariadb_bin), f"-u{ADMIN_USER}", "--host=127.0.0.1",
              f"--port={self.id}"],
         )
 
@@ -135,7 +137,7 @@ class Instance:
 
         cmd = [
             str(self.mariadb_admin_bin),
-            "-uroot",
+            f"-u{ADMIN_USER}",
             f"--socket={self.socket_path}",
             "ping",
         ]
@@ -167,7 +169,7 @@ class Instance:
 
         cmd = [
             str(self.mariadb_bin),
-            "-uroot",
+            f"-u{ADMIN_USER}",
             f"--socket={self.socket_path}",
             "-B",
             "-e", sql,

@@ -42,6 +42,7 @@ def deploy_replication(tarball_path, master_instance_id):
     deployment._generate_my_cnf(str(master_id), master_path,
                                 extra_config=master_extra)
     deployment.initialize_database(master_path)
+    deployment.create_admin_user(master_path)
 
     # --- Deploy slave ---
     click.secho("\n=== Deploying Slave ===", fg='cyan', bold=True)
@@ -59,6 +60,7 @@ def deploy_replication(tarball_path, master_instance_id):
     deployment._generate_my_cnf(str(slave_id), slave_path,
                                 extra_config=slave_extra)
     deployment.initialize_database(slave_path)
+    deployment.create_admin_user(slave_path)
 
     # --- Start both instances ---
     click.secho("\n=== Starting Instances ===", fg='cyan', bold=True)
@@ -79,7 +81,7 @@ def deploy_replication(tarball_path, master_instance_id):
         "CHANGE MASTER TO "
         "MASTER_HOST='127.0.0.1', "
         f"MASTER_PORT={master_id}, "
-        "MASTER_USER='root', "
+        f"MASTER_USER='{deployment.ADMIN_USER}', "
         "MASTER_USE_GTID=slave_pos"
     )
 
