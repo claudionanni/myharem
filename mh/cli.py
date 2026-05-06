@@ -207,6 +207,40 @@ def cli(instance_id):
     service.cli_instance(instance_id)
 
 
+# ---------- cd / chdir ----------
+
+def _go_to_instance_dir(instance_id, open_shell=False):
+    """Outputs instance path or opens a subshell in the instance directory."""
+    instance = Instance(instance_id)
+    instance._require_exists()
+    instance_path = str(instance.path)
+
+    if open_shell:
+        shell = os.environ.get('SHELL', '/bin/bash')
+        os.chdir(instance_path)
+        os.execv(shell, [shell])
+    else:
+        click.echo(instance_path)
+
+
+@main.command(name='cd')
+@click.argument('instance_id')
+@click.option('--shell', 'open_shell', is_flag=True,
+              help='Open a subshell in the instance directory.')
+def cd_command(instance_id, open_shell):
+    """Prints instance path (use with: cd \"$(mh cd <instance_id>)\")."""
+    _go_to_instance_dir(instance_id, open_shell=open_shell)
+
+
+@main.command(name='chdir', hidden=True)
+@click.argument('instance_id')
+@click.option('--shell', 'open_shell', is_flag=True,
+              help='Open a subshell in the instance directory.')
+def chdir_command(instance_id, open_shell):
+    """Alias for 'mh cd'."""
+    _go_to_instance_dir(instance_id, open_shell=open_shell)
+
+
 # ---------- log ----------
 
 @main.command()

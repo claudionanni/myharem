@@ -147,6 +147,20 @@ Opens a MariaDB client connected via socket (using the `myharem` admin user).
 
 Opens a MariaDB client connected via TCP (using the `myharem` admin user).
 
+### `mh cd <instance_id>`
+
+Prints the instance home directory path.
+
+```bash
+cd "$(mh cd 18000)"
+```
+
+Optional:
+
+```bash
+mh cd --shell 18000
+```
+
 ### `mh log <instance_id>`
 
 Shows the latest log entries for an instance.
