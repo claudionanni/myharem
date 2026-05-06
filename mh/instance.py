@@ -40,7 +40,52 @@ class Instance:
 
     @property
     def socket_path(self):
-        return self.path / f"{self.id}.sock"
+        candidates = self._socket_candidates()
+        for candidate in candidates:
+            if candidate.exists():
+                return candidate
+        if candidates:
+            return candidates[0]
+        return Path(f"/tmp/mh-{self.id}.sock")
+
+    def _configured_socket_path(self):
+        """Reads socket path from my.cnf if present."""
+        if not self.path:
+            return None
+        if not self.my_cnf_path.exists():
+            return None
+
+        for raw in self.my_cnf_path.read_text().splitlines():
+            line = raw.strip()
+            if line.startswith('socket='):
+                value = line.split('=', 1)[1].strip()
+                if value:
+                    return Path(value)
+        return None
+
+    def _socket_candidates(self):
+        """Returns candidate socket paths for this instance.
+
+        Includes compatibility fallback for legacy long socket paths that
+        can be truncated by client/server socket path limits.
+        """
+        candidates = []
+
+        configured = self._configured_socket_path()
+        if configured:
+            candidates.append(configured)
+            configured_str = str(configured)
+            if len(configured_str) > 64:
+                candidates.append(Path(configured_str[:64]))
+
+        if self.path:
+            candidates.append(self.path / f"{self.id}.sock")
+
+        deduped = []
+        for candidate in candidates:
+            if candidate not in deduped:
+                deduped.append(candidate)
+        return deduped
 
     @property
     def log_path(self):
@@ -166,7 +211,7 @@ class Instance:
         Unlike is_running(), this doesn't require any user authentication,
         making it safe to use before service users are created.
         """
-        return self.socket_path.exists()
+        return any(candidate.exists() for candidate in self._socket_candidates())
 
     def run_sql(self, sql, timeout=10):
         """Executes a SQL statement and returns the output.

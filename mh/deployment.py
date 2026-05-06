@@ -94,10 +94,13 @@ def _generate_my_cnf(instance_id, instance_path, extra_config=None):
     instance_path = Path(instance_path)
     my_cnf_path = instance_path / 'my.cnf'
 
+    # Keep socket path short to avoid unix_socket path truncation limits.
+    socket_path = Path("/tmp") / f"mh-{instance_id}.sock"
+
     lines = [
         "[mariadbd]",
         f"port={instance_id}",
-        f"socket={instance_path / f'{instance_id}.sock'}",
+        f"socket={socket_path}",
         f"basedir={instance_path}",
         f"datadir={instance_path / 'data'}",
         f"server_id={instance_id}",
