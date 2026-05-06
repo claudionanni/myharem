@@ -48,20 +48,36 @@ class Instance:
             return candidates[0]
         return Path(f"/tmp/mh-{self.id}.sock")
 
-    def _configured_socket_path(self):
-        """Reads socket path from my.cnf if present."""
-        if not self.path:
-            return None
-        if not self.my_cnf_path.exists():
-            return None
+    def _read_my_cnf_options(self, option_name):
+        """Reads option values from my.cnf with section context.
 
+        Returns:
+            List of (section, value) tuples in file order.
+        """
+        if not self.path:
+            return []
+        if not self.my_cnf_path.exists():
+            return []
+
+        pairs = []
+        section = ''
         for raw in self.my_cnf_path.read_text().splitlines():
             line = raw.strip()
-            if line.startswith('socket='):
-                value = line.split('=', 1)[1].strip()
-                if value:
-                    return Path(value)
-        return None
+            if not line or line.startswith('#') or line.startswith(';'):
+                continue
+            if line.startswith('[') and line.endswith(']'):
+                section = line[1:-1].strip().lower()
+                continue
+            if '=' not in line:
+                continue
+
+            key, value = line.split('=', 1)
+            if key.strip().lower() != option_name:
+                continue
+            cleaned = value.strip().strip('"').strip("'")
+            if cleaned:
+                pairs.append((section, cleaned))
+        return pairs
 
     def _socket_candidates(self):
         """Returns candidate socket paths for this instance.
@@ -71,15 +87,47 @@ class Instance:
         """
         candidates = []
 
-        configured = self._configured_socket_path()
-        if configured:
-            candidates.append(configured)
-            configured_str = str(configured)
-            if len(configured_str) > 64:
-                candidates.append(Path(configured_str[:64]))
+        # Read configured options from my.cnf, prioritizing server sections.
+        socket_pairs = self._read_my_cnf_options('socket')
+        datadir_pairs = self._read_my_cnf_options('datadir')
+        section_order = ['mariadbd', 'mysqld', 'server', 'client-server',
+                         'client', '']
+        order_idx = {name: i for i, name in enumerate(section_order)}
+
+        def _pair_rank(pair):
+            section, _ = pair
+            return order_idx.get(section, len(section_order))
+
+        socket_pairs = sorted(socket_pairs, key=_pair_rank)
+        datadir_pairs = sorted(datadir_pairs, key=_pair_rank)
+
+        datadir = None
+        if datadir_pairs:
+            datadir_raw = Path(datadir_pairs[0][1])
+            if datadir_raw.is_absolute():
+                datadir = datadir_raw
+            elif self.path:
+                datadir = self.path / datadir_raw
+
+        for _, socket_raw in socket_pairs:
+            socket_cfg = Path(socket_raw)
+            if socket_cfg.is_absolute():
+                candidates.append(socket_cfg)
+                socket_cfg_str = str(socket_cfg)
+                if len(socket_cfg_str) > 64:
+                    candidates.append(Path(socket_cfg_str[:64]))
+            else:
+                # Relative socket path: resolve against common roots.
+                if self.path:
+                    candidates.append(self.path / socket_cfg)
+                if datadir:
+                    candidates.append(datadir / socket_cfg)
+                candidates.append(socket_cfg)
 
         if self.path:
             candidates.append(self.path / f"{self.id}.sock")
+            candidates.append(self.path / 'data' / f"{self.id}.sock")
+        candidates.append(Path('/tmp') / f"mh-{self.id}.sock")
 
         deduped = []
         for candidate in candidates:
