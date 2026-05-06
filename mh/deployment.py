@@ -163,12 +163,16 @@ SST_PASSWORD = 'sstpwd'
 # All user creation SQL. Executed as root on a running instance.
 CREATE_USERS_SQL = (
     f"CREATE USER IF NOT EXISTS '{ADMIN_USER}'@'localhost';\n"
+    # Repair legacy instances where myharem may exist with wrong auth plugin.
+    f"ALTER USER '{ADMIN_USER}'@'localhost' IDENTIFIED BY '';\n"
     f"GRANT ALL PRIVILEGES ON *.* TO '{ADMIN_USER}'@'localhost' "
     f"WITH GRANT OPTION;\n"
     f"CREATE USER IF NOT EXISTS '{REPL_USER}'@'localhost';\n"
+    f"ALTER USER '{REPL_USER}'@'localhost' IDENTIFIED BY '';\n"
     f"GRANT REPLICATION SLAVE ON *.* TO '{REPL_USER}'@'localhost';\n"
     f"CREATE USER IF NOT EXISTS '{SST_USER}'@'localhost' "
     f"IDENTIFIED BY '{SST_PASSWORD}';\n"
+    f"ALTER USER '{SST_USER}'@'localhost' IDENTIFIED BY '{SST_PASSWORD}';\n"
     f"GRANT RELOAD, PROCESS, LOCK TABLES, REPLICATION CLIENT "
     f"ON *.* TO '{SST_USER}'@'localhost';\n"
     f"FLUSH PRIVILEGES;\n"
@@ -189,7 +193,7 @@ def create_service_users(instance, retries=5):
     - mh_repl: REPLICATION SLAVE privilege (for async replication)
     - mh_sst: SST privileges with password (for Galera mariabackup)
 
-    Idempotent — skips silently if users already exist.
+    Idempotent — skips silently if login as myharem already works.
 
     Args:
         instance: A running Instance object.
@@ -199,16 +203,15 @@ def create_service_users(instance, retries=5):
     if not mariadb.exists():
         mariadb = instance.path / 'bin' / 'mysql'
 
-    # Check if myharem user already exists (skip if so)
+    # If login with myharem already works, skip.
     check_cmd = [
-        str(mariadb), '-uroot',
+        str(mariadb), f'-u{ADMIN_USER}',
         f'--socket={instance.socket_path}',
-        '-B', '-N', '-e',
-        f"SELECT 1 FROM mysql.user WHERE User='{ADMIN_USER}' LIMIT 1",
+        '-B', '-N', '-e', "SELECT 1",
     ]
     check = subprocess.run(check_cmd, capture_output=True, text=True)
     if check.returncode == 0 and check.stdout.strip() == '1':
-        return  # Users already exist
+        return  # Users already usable
 
     click.echo("Creating service users (myharem, mh_repl, mh_sst)...")
 
