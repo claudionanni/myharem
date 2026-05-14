@@ -38,6 +38,30 @@ class Instance:
     def my_cnf_path(self):
         return self.path / 'my.cnf'
 
+    def _section_rank(self, section_name):
+        section_order = ['mariadbd', 'mysqld', 'server', 'client-server',
+                         'client', '']
+        try:
+            return section_order.index(section_name)
+        except ValueError:
+            return len(section_order)
+
+    def _primary_datadir(self):
+        """Returns configured datadir path if available."""
+        datadir_pairs = sorted(
+            self._read_my_cnf_options('datadir'),
+            key=lambda pair: self._section_rank(pair[0]),
+        )
+        if not datadir_pairs:
+            return None
+
+        datadir_raw = Path(datadir_pairs[0][1])
+        if datadir_raw.is_absolute():
+            return datadir_raw
+        if self.path:
+            return self.path / datadir_raw
+        return None
+
     @property
     def socket_path(self):
         candidates = self._socket_candidates()
@@ -89,25 +113,10 @@ class Instance:
 
         # Read configured options from my.cnf, prioritizing server sections.
         socket_pairs = self._read_my_cnf_options('socket')
-        datadir_pairs = self._read_my_cnf_options('datadir')
-        section_order = ['mariadbd', 'mysqld', 'server', 'client-server',
-                         'client', '']
-        order_idx = {name: i for i, name in enumerate(section_order)}
-
-        def _pair_rank(pair):
-            section, _ = pair
-            return order_idx.get(section, len(section_order))
-
-        socket_pairs = sorted(socket_pairs, key=_pair_rank)
-        datadir_pairs = sorted(datadir_pairs, key=_pair_rank)
-
-        datadir = None
-        if datadir_pairs:
-            datadir_raw = Path(datadir_pairs[0][1])
-            if datadir_raw.is_absolute():
-                datadir = datadir_raw
-            elif self.path:
-                datadir = self.path / datadir_raw
+        socket_pairs = sorted(
+            socket_pairs, key=lambda pair: self._section_rank(pair[0])
+        )
+        datadir = self._primary_datadir()
 
         for _, socket_raw in socket_pairs:
             socket_cfg = Path(socket_raw)
@@ -134,6 +143,99 @@ class Instance:
             if candidate not in deduped:
                 deduped.append(candidate)
         return deduped
+
+    def _pid_candidates(self):
+        """Returns candidate PID file paths for this instance."""
+        candidates = []
+        datadir = self._primary_datadir()
+
+        pid_pairs = (
+            self._read_my_cnf_options('pid-file')
+            + self._read_my_cnf_options('pid_file')
+        )
+        pid_pairs = sorted(pid_pairs, key=lambda pair: self._section_rank(pair[0]))
+
+        for _, pid_raw in pid_pairs:
+            pid_cfg = Path(pid_raw)
+            if pid_cfg.is_absolute():
+                candidates.append(pid_cfg)
+            else:
+                if self.path:
+                    candidates.append(self.path / pid_cfg)
+                if datadir:
+                    candidates.append(datadir / pid_cfg)
+                candidates.append(pid_cfg)
+
+        if self.path:
+            candidates.append(self.path / f"{self.id}.pid")
+        if datadir:
+            candidates.append(datadir / f"{self.id}.pid")
+            for pid_file in datadir.glob('*.pid'):
+                candidates.append(pid_file)
+
+        deduped = []
+        for candidate in candidates:
+            if candidate not in deduped:
+                deduped.append(candidate)
+        return deduped
+
+    def _ensure_pid_file_config(self):
+        """Ensures my.cnf has a dedicated pid-file for this instance."""
+        if not self.my_cnf_path.exists():
+            return
+
+        pid_pairs = (
+            self._read_my_cnf_options('pid-file')
+            + self._read_my_cnf_options('pid_file')
+        )
+        if pid_pairs:
+            return
+
+        with open(self.my_cnf_path, 'a') as f:
+            f.write(f"\npid-file={self.path / f'{self.id}.pid'}\n")
+
+    @staticmethod
+    def _pid_alive(pid):
+        try:
+            os.kill(pid, 0)
+            return True
+        except (ProcessLookupError, PermissionError, OSError):
+            return False
+
+    @staticmethod
+    def _pid_cmdline(pid):
+        try:
+            data = Path(f"/proc/{pid}/cmdline").read_bytes()
+            return data.decode(errors='ignore').replace('\x00', ' ').strip()
+        except Exception:
+            return ""
+
+    def _cleanup_stale_pid_files(self):
+        """Removes stale PID files that block mysqld_safe startup."""
+        for pid_file in self._pid_candidates():
+            if not pid_file.exists():
+                continue
+            try:
+                raw = pid_file.read_text().strip()
+                token = raw.split()[0] if raw else ""
+                pid = int(token)
+            except Exception:
+                continue
+
+            if self._pid_alive(pid):
+                cmdline = self._pid_cmdline(pid)
+                if (
+                    ('mysqld' in cmdline or 'mariadbd' in cmdline)
+                    and self.path
+                    and str(self.path) in cmdline
+                ):
+                    # Looks like this instance is already represented by the PID.
+                    continue
+
+            try:
+                pid_file.unlink()
+            except FileNotFoundError:
+                pass
 
     @property
     def log_path(self):
@@ -164,6 +266,10 @@ class Instance:
             raise click.ClickException(
                 f"mysqld_safe not found at {self.mysqld_safe_bin}"
             )
+
+        # Upgrades/manual datadir copies can bring stale PID files.
+        self._ensure_pid_file_config()
+        self._cleanup_stale_pid_files()
 
         cmd = [str(self.mysqld_safe_bin), f"--defaults-file={self.my_cnf_path}"]
         if wsrep_new_cluster:

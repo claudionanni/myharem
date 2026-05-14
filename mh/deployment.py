@@ -101,6 +101,7 @@ def _generate_my_cnf(instance_id, instance_path, extra_config=None):
         "[mariadbd]",
         f"port={instance_id}",
         f"socket={socket_path}",
+        f"pid-file={instance_path / f'{instance_id}.pid'}",
         f"basedir={instance_path}",
         f"datadir={instance_path / 'data'}",
         f"server_id={instance_id}",
