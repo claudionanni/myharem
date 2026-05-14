@@ -193,7 +193,7 @@ def create_service_users(instance, retries=5):
     - mh_repl: REPLICATION SLAVE privilege (for async replication)
     - mh_sst: SST privileges with password (for Galera mariabackup)
 
-    Idempotent — skips silently if login as myharem already works.
+    Idempotent — safe to run repeatedly; always re-applies grants.
 
     Args:
         instance: A running Instance object.
@@ -203,17 +203,7 @@ def create_service_users(instance, retries=5):
     if not mariadb.exists():
         mariadb = instance.path / 'bin' / 'mysql'
 
-    # If login with myharem already works, skip.
-    check_cmd = [
-        str(mariadb), f'-u{ADMIN_USER}',
-        f'--socket={instance.socket_path}',
-        '-B', '-N', '-e', "SELECT 1",
-    ]
-    check = subprocess.run(check_cmd, capture_output=True, text=True)
-    if check.returncode == 0 and check.stdout.strip() == '1':
-        return  # Users already usable
-
-    click.echo("Creating service users (myharem, mh_repl, mh_sst)...")
+    click.echo("Ensuring service users/grants (myharem, mh_repl, mh_sst)...")
 
     # Retry loop — socket may exist before server is fully ready
     cmd = [
@@ -241,4 +231,4 @@ def create_service_users(instance, retries=5):
     subprocess.run(cmd_extra, capture_output=True, text=True)
     # Ignore errors — older versions don't have these privilege names
 
-    click.secho("Service users created.", fg='green')
+    click.secho("Service users/grants ensured.", fg='green')

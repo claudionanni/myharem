@@ -64,6 +64,9 @@ def stop_instance(instance_id):
     """Stops a MariaDB instance."""
     instance = Instance(instance_id)
     instance._require_exists()
+    # Repair/ensure admin grants before attempting shutdown.
+    if instance.is_socket_ready():
+        deployment.create_service_users(instance, retries=1)
     instance.stop()
 
 
