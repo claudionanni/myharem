@@ -146,12 +146,16 @@ def _deploy_wizard(ctx):
               help='Path to libgalera_smm.so, for tarballs that do not bundle '
                    'Galera (e.g. generic linux-x86_64 builds). Overrides '
                    'wsrep_provider / MYHAREM_WSREP_PROVIDER.')
+@click.option('--advertise', 'advertise', default='127.0.0.1', metavar='IP',
+              show_default=True,
+              help='Address peers use to reach these nodes (single host). For a '
+                   'cluster spanning hosts, use `mh galera-node` per host.')
 @click.pass_context
-def deploygalera(ctx, tarball, first_instance_id, nodes, wsrep_provider):
+def deploygalera(ctx, tarball, first_instance_id, nodes, wsrep_provider, advertise):
     """Deploys an N-node Galera cluster (default 3)."""
     provider = wsrep_provider or config.get_wsrep_provider()
     result = galera.deploy_cluster(tarball, first_instance_id, nodes=nodes,
-                                   wsrep_provider=provider)
+                                   wsrep_provider=provider, advertise=advertise)
     _emit_deploy(ctx, result)
 
 
@@ -167,6 +171,69 @@ def deployreplication(ctx, tarball, instance_id, slaves):
     """Deploys a master + N async (GTID) slaves."""
     from . import replication
     result = replication.deploy_replication(tarball, instance_id, slaves=slaves)
+    _emit_deploy(ctx, result)
+
+
+# ---------- distributed (multi-host) primitives ----------
+
+@main.command('galera-node')
+@click.argument('tarball')
+@click.argument('node_id')
+@click.option('--members', 'members', required=True,
+              help='Comma-separated gcomm seed list host:wsrep_port,... (all peers).')
+@click.option('--cluster-name', 'cluster_name', required=True,
+              help='Shared cluster name — identical on every host.')
+@click.option('--advertise', 'advertise', default=None, metavar='IP',
+              help="This host's reachable IP (default: config / "
+                   'MYHAREM_ADVERTISE_ADDRESS).')
+@click.option('--bootstrap', is_flag=True, default=False,
+              help="Marker only; start with 'mh service start --bootstrap <id>'.")
+@click.option('--wsrep-provider', 'wsrep_provider', default=None, metavar='PATH',
+              help="Path to libgalera_smm.so if the tarball doesn't bundle it.")
+@click.pass_context
+def galera_node(ctx, tarball, node_id, members, cluster_name, advertise,
+                bootstrap, wsrep_provider):
+    """Deploys ONE local Galera node into a multi-host cluster."""
+    provider = wsrep_provider or config.get_wsrep_provider()
+    adv = advertise or config.get_advertise_address()
+    member_list = [m.strip() for m in members.split(',') if m.strip()]
+    result = galera.deploy_node(tarball, node_id, member_list, adv, cluster_name,
+                                bootstrap=bootstrap, wsrep_provider=provider)
+    _emit_deploy(ctx, result)
+
+
+@main.command('repl-master')
+@click.argument('tarball')
+@click.argument('master_id')
+@click.option('--advertise', 'advertise', default=None, metavar='IP',
+              help="This host's reachable IP (default: config / "
+                   'MYHAREM_ADVERTISE_ADDRESS).')
+@click.pass_context
+def repl_master(ctx, tarball, master_id, advertise):
+    """Deploys + starts a replication master on this host (distributed)."""
+    from . import replication
+    adv = advertise or config.get_advertise_address()
+    result = replication.deploy_master(tarball, master_id, advertise=adv)
+    _emit_deploy(ctx, result)
+
+
+@main.command('repl-slave')
+@click.argument('tarball')
+@click.argument('slave_id')
+@click.option('--master-host', 'master_host', required=True,
+              help="Master's reachable IP.")
+@click.option('--master-port', 'master_port', required=True, type=int,
+              help="Master's port (its instance id).")
+@click.option('--advertise', 'advertise', default=None, metavar='IP',
+              help="This host's reachable IP (default: config / "
+                   'MYHAREM_ADVERTISE_ADDRESS).')
+@click.pass_context
+def repl_slave(ctx, tarball, slave_id, master_host, master_port, advertise):
+    """Deploys + starts a replication slave on this host, wired to a master."""
+    from . import replication
+    adv = advertise or config.get_advertise_address()
+    result = replication.deploy_slave(tarball, slave_id, master_host,
+                                      master_port, advertise=adv)
     _emit_deploy(ctx, result)
 
 

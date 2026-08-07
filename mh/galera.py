@@ -24,7 +24,8 @@ def compute_node_ids(first_instance_id, nodes):
     return [first + i * INST_STEP for i in range(int(nodes))]
 
 
-def deploy_cluster(tarball_path, first_instance_id, nodes=3, wsrep_provider=None):
+def deploy_cluster(tarball_path, first_instance_id, nodes=3, wsrep_provider=None,
+                   advertise="127.0.0.1"):
     """Deploys an N-node Galera cluster (default 3) on a single host.
 
     Nodes are placed at first_id, first_id+10000, first_id+20000, ... and share
@@ -33,7 +34,9 @@ def deploy_cluster(tarball_path, first_instance_id, nodes=3, wsrep_provider=None
     failure.
 
     `wsrep_provider` overrides the Galera provider library path for tarballs
-    that don't bundle it (e.g. generic 'linux-x86_64' builds).
+    that don't bundle it (e.g. generic 'linux-x86_64' builds). `advertise` is the
+    address peers use to reach these nodes (default 127.0.0.1); for a cluster
+    spanning hosts, use `deploy_node` per host instead.
     """
     first = int(first_instance_id)
     nodes = int(nodes)
@@ -48,9 +51,7 @@ def deploy_cluster(tarball_path, first_instance_id, nodes=3, wsrep_provider=None
 
     node_ids = compute_node_ids(first, nodes)
     wsrep_ports = [nid + WSREP_STEP for nid in node_ids]
-    cluster_address = "gcomm://" + ",".join(
-        f"127.0.0.1:{p}" for p in wsrep_ports
-    )
+    cluster_address = _gcomm([f"{advertise}:{p}" for p in wsrep_ports])
     # Unique per-cluster name so multiple clusters can coexist on one host.
     cluster_name = f"mh_cluster_{first}"
 
@@ -66,7 +67,7 @@ def deploy_cluster(tarball_path, first_instance_id, nodes=3, wsrep_provider=None
             deployed.append(str(node_id))
             _generate_galera_my_cnf(
                 instance_path, str(node_id), cluster_address, cluster_name,
-                wsrep_provider=wsrep_provider,
+                advertise=advertise, wsrep_provider=wsrep_provider,
             )
             deployment.initialize_database(instance_path)
             node_infos.append(model.NodeInfo(
@@ -96,6 +97,65 @@ def deploy_cluster(tarball_path, first_instance_id, nodes=3, wsrep_provider=None
     report.success(f"Galera cluster '{cluster_name}' deployed ({nodes} nodes).")
     report.log(f"Node IDs: {', '.join(str(n) for n in node_ids)}")
     report.log(f"Start the whole cluster with:  sudo mh cluster start {first}")
+    return result
+
+
+def deploy_node(tarball_path, node_id, members, advertise, cluster_name,
+                bootstrap=False, wsrep_provider=None):
+    """Deploys ONE local Galera node into a (possibly multi-host) cluster.
+
+    `members` is the full gcomm seed list as 'host:wsrep_port' strings (every
+    peer, including this node); `advertise` is this host's reachable IP;
+    `cluster_name` must match across all hosts. Intended for one node per VM:
+    the caller runs this on each host, then starts the bootstrap node first
+    (`mh service start --bootstrap`) and joiners after. Records a single-node
+    manifest entry so local `mh service`/`mh log` work.
+    """
+    node_id = int(node_id)
+    if wsrep_provider and not Path(wsrep_provider).expanduser().exists():
+        raise click.ClickException(
+            f"--wsrep-provider path does not exist: {wsrep_provider}"
+        )
+    if not members:
+        raise click.ClickException("deploy_node needs a non-empty members list.")
+
+    tarball_name = deployment.resolve_tarball(tarball_path).name
+    cluster_address = _gcomm(list(members))
+    report.log(
+        f"Deploying Galera node {node_id} (advertise {advertise}) "
+        f"into '{cluster_name}'..."
+    )
+    deployed = []
+    try:
+        instance_path = deployment.deploy_instance(
+            tarball_path, str(node_id), init_db=False
+        )
+        deployed.append(str(node_id))
+        _generate_galera_my_cnf(
+            instance_path, str(node_id), cluster_address, cluster_name,
+            advertise=advertise, wsrep_provider=wsrep_provider,
+        )
+        deployment.initialize_database(instance_path)
+    except Exception:
+        report.error("Galera node deploy failed — rolling back.")
+        deployment.rollback_instances(deployed)
+        raise
+
+    node_info = model.NodeInfo(
+        id=str(node_id), role="galera", port=node_id,
+        socket=f"/tmp/mh-{node_id}.sock",
+        datadir=str(Path(instance_path) / "data"),
+        path=str(instance_path),
+        wsrep_port=node_id + WSREP_STEP, sst_port=node_id + SST_STEP,
+    )
+    result = model.DeploymentResult(
+        topology="galera", cluster_id=str(node_id), tarball=tarball_name,
+        nodes=[node_info], created_at=_now(),
+    )
+    manifest.record(result)
+    hint = "--bootstrap " if bootstrap else ""
+    report.success(f"Galera node {node_id} deployed into '{cluster_name}'.")
+    report.log(f"Start it with:  sudo mh service start {hint}{node_id}")
     return result
 
 
@@ -156,14 +216,28 @@ def _find_galera_lib(instance_path, override=None):
     )
 
 
+def _gcomm(members):
+    """Builds a gcomm:// cluster address from 'host:wsrep_port' peer strings."""
+    return "gcomm://" + ",".join(members)
+
+
 def _generate_galera_my_cnf(instance_path, instance_id, cluster_address,
-                            cluster_name="myharem_cluster", wsrep_provider=None):
-    """Generates a Galera-specific my.cnf for a cluster node."""
+                            cluster_name="myharem_cluster", advertise="127.0.0.1",
+                            wsrep_provider=None):
+    """Generates a Galera-specific my.cnf for a cluster node.
+
+    `advertise` is the IP peers use to reach this node (default 127.0.0.1 for
+    single-host). When it's a real IP, Galera listens on all interfaces but
+    advertises the real address.
+    """
     instance_path = Path(instance_path)
     wsrep_port = int(instance_id) + WSREP_STEP
     sst_port = int(instance_id) + SST_STEP
 
     galera_lib = _find_galera_lib(instance_path, override=wsrep_provider)
+    # Listen on all interfaces when advertising a real IP; keep loopback for the
+    # single-host default so colocated output is byte-for-byte unchanged.
+    listen = "127.0.0.1" if advertise == "127.0.0.1" else "0.0.0.0"
 
     galera_config = {
         "default_storage_engine": "InnoDB",
@@ -174,10 +248,10 @@ def _generate_galera_my_cnf(instance_path, instance_id, cluster_address,
         "wsrep_cluster_name": cluster_name,
         "wsrep_cluster_address": cluster_address,
         "wsrep_node_name": f"NODE_{instance_id}",
-        "wsrep_node_address": f"127.0.0.1:{wsrep_port}",
+        "wsrep_node_address": f"{advertise}:{wsrep_port}",
         "wsrep_provider_options":
-            f"gcs.fc_limit=16;gmcast.listen_addr=tcp://127.0.0.1:{wsrep_port}",
-        "wsrep_sst_receive_address": f"127.0.0.1:{sst_port}",
+            f"gcs.fc_limit=16;gmcast.listen_addr=tcp://{listen}:{wsrep_port}",
+        "wsrep_sst_receive_address": f"{advertise}:{sst_port}",
         "wsrep_sst_method": "mariabackup",
         "wsrep_sst_auth": f"{deployment.SST_USER}:{deployment.SST_PASSWORD}",
     }

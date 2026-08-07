@@ -247,15 +247,19 @@ SST_PASSWORD = config.get_sst_password()
 ADMIN_PASSWORD = config.get_admin_password()
 
 
-def _create_users_sql():
+def _create_users_sql(repl_host='localhost'):
+    """Service-user SQL. `repl_host` is the host the async-replication user is
+    granted for — 'localhost' single-host, '%' (or a peer CIDR) for a slave that
+    connects to the master over the network. Admin and SST stay local (SST via
+    mariabackup authenticates on the donor locally)."""
     return (
         f"CREATE USER IF NOT EXISTS '{ADMIN_USER}'@'localhost';\n"
         f"ALTER USER '{ADMIN_USER}'@'localhost' IDENTIFIED BY '{ADMIN_PASSWORD}';\n"
         f"GRANT ALL PRIVILEGES ON *.* TO '{ADMIN_USER}'@'localhost' "
         f"WITH GRANT OPTION;\n"
-        f"CREATE USER IF NOT EXISTS '{REPL_USER}'@'localhost';\n"
-        f"ALTER USER '{REPL_USER}'@'localhost' IDENTIFIED BY '';\n"
-        f"GRANT REPLICATION SLAVE ON *.* TO '{REPL_USER}'@'localhost';\n"
+        f"CREATE USER IF NOT EXISTS '{REPL_USER}'@'{repl_host}';\n"
+        f"ALTER USER '{REPL_USER}'@'{repl_host}' IDENTIFIED BY '';\n"
+        f"GRANT REPLICATION SLAVE ON *.* TO '{REPL_USER}'@'{repl_host}';\n"
         f"CREATE USER IF NOT EXISTS '{SST_USER}'@'localhost' "
         f"IDENTIFIED BY '{SST_PASSWORD}';\n"
         f"ALTER USER '{SST_USER}'@'localhost' IDENTIFIED BY '{SST_PASSWORD}';\n"
@@ -272,10 +276,11 @@ ADMIN_EXTRA_GRANTS = (
 )
 
 
-def create_service_users(instance, retries=5):
+def create_service_users(instance, retries=5, repl_host='localhost'):
     """Creates service users on a running instance by connecting as root.
 
-    Idempotent — safe to run repeatedly; always re-applies grants.
+    Idempotent — safe to run repeatedly; always re-applies grants. `repl_host`
+    widens the async-replication user's grant host for cross-host slaves.
     """
     mariadb = instance.path / 'bin' / 'mariadb'
     if not mariadb.exists():
@@ -286,7 +291,7 @@ def create_service_users(instance, retries=5):
     cmd = [
         str(mariadb), '-uroot',
         f'--socket={instance.socket_path}',
-        '-B', '-e', _create_users_sql(),
+        '-B', '-e', _create_users_sql(repl_host),
     ]
     for attempt in range(retries):
         process = subprocess.run(cmd, capture_output=True, text=True)

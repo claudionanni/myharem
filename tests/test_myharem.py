@@ -170,6 +170,67 @@ def test_wsrep_provider_config_resolution(monkeypatch):
     assert config.get_wsrep_provider() is None
 
 
+# ---- multi-host / advertise address ----
+
+def test_gcomm_builds_address():
+    assert galera._gcomm(["1.2.3.4:11000", "5.6.7.8:21000"]) == (
+        "gcomm://1.2.3.4:11000,5.6.7.8:21000"
+    )
+
+
+def test_advertise_address_config(monkeypatch):
+    monkeypatch.setenv("MYHAREM_ADVERTISE_ADDRESS", "192.168.1.50")
+    assert config.get_advertise_address() == "192.168.1.50"
+    monkeypatch.delenv("MYHAREM_ADVERTISE_ADDRESS", raising=False)
+    monkeypatch.setenv("MYHAREM_CONF", "/nonexistent/myharem.conf")
+    assert config.get_advertise_address() == "127.0.0.1"
+
+
+def test_deploy_galera_single_host_is_loopback(stub_deploy):
+    # Regression guard: the default (colocated) output must stay loopback.
+    result = galera.deploy_cluster("fake-11.8.6.tar.gz", "20000", nodes=2)
+    my_cnf = (Path(result.nodes[0].path) / "my.cnf").read_text()
+    assert "wsrep_node_address=127.0.0.1:21000" in my_cnf
+    assert "gmcast.listen_addr=tcp://127.0.0.1:21000" in my_cnf
+    assert "wsrep_sst_receive_address=127.0.0.1:22000" in my_cnf
+    assert "wsrep_cluster_address=gcomm://127.0.0.1:21000,127.0.0.1:31000" in my_cnf
+
+
+def test_deploy_galera_advertises_real_ip(stub_deploy):
+    result = galera.deploy_cluster(
+        "fake-11.8.6.tar.gz", "20000", nodes=2, advertise="10.0.0.5"
+    )
+    my_cnf = (Path(result.nodes[0].path) / "my.cnf").read_text()
+    assert "wsrep_node_address=10.0.0.5:21000" in my_cnf
+    assert "gmcast.listen_addr=tcp://0.0.0.0:21000" in my_cnf  # listen all ifaces
+    assert "wsrep_sst_receive_address=10.0.0.5:22000" in my_cnf
+    assert "wsrep_cluster_address=gcomm://10.0.0.5:21000,10.0.0.5:31000" in my_cnf
+
+
+def test_deploy_node_distributed(stub_deploy):
+    members = ["10.0.0.1:21000", "10.0.0.2:21000"]
+    result = galera.deploy_node(
+        "fake-11.8.6.tar.gz", "20000", members, "10.0.0.2", "mh_env42"
+    )
+    assert result.topology == "galera" and result.nodes[0].id == "20000"
+    my_cnf = (Path(result.nodes[0].path) / "my.cnf").read_text()
+    assert "wsrep_cluster_address=gcomm://10.0.0.1:21000,10.0.0.2:21000" in my_cnf
+    assert "wsrep_node_address=10.0.0.2:21000" in my_cnf
+    assert "gmcast.listen_addr=tcp://0.0.0.0:21000" in my_cnf
+    assert "wsrep_cluster_name=mh_env42" in my_cnf
+    assert manifest.get("20000")["topology"] == "galera"
+
+
+def test_replication_grant_host():
+    default_sql = deployment._create_users_sql()
+    wide_sql = deployment._create_users_sql("%")
+    assert "'mh_repl'@'localhost'" in default_sql
+    assert "'mh_repl'@'%'" in wide_sql
+    # admin + sst stay local regardless of repl_host
+    assert "'myharem'@'localhost'" in wide_sql
+    assert "'mh_sst'@'localhost'" in wide_sql
+
+
 # ---- replication deploy orchestration ----
 
 def test_deploy_replication_records_result(stub_deploy, monkeypatch):

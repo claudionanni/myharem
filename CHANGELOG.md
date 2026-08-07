@@ -2,6 +2,31 @@
 
 All notable changes to MyHarem are documented here.
 
+## [0.3.0] - 2026-08-07
+
+Multi-host: myharem can now advertise a real IP and form clusters spanning
+hosts (one node per VM), not just co-located loopback instances — making the
+tarball install method usable in any topology, not only single-host.
+
+### Added
+- `advertise_address` config / `MYHAREM_ADVERTISE_ADDRESS` env (default
+  `127.0.0.1`): the IP this host advertises to Galera/replication peers.
+- Distributed primitives, one node per host:
+  - `mh galera-node <tarball> <id> --members host:port,... --cluster-name NAME
+    [--advertise IP] [--wsrep-provider PATH]` — deploy one local Galera node into
+    a multi-host cluster (start the bootstrap node first, joiners after).
+  - `mh repl-master <tarball> <id> [--advertise IP]` and `mh repl-slave <tarball>
+    <id> --master-host IP --master-port N [--advertise IP]`.
+- `mh deploygalera --advertise IP` for a single host reachable on a real IP.
+
+### Changed
+- Galera addresses are built from an explicit member list; when advertising a
+  real IP, Galera listens on all interfaces (`gmcast.listen_addr=0.0.0.0`) and
+  advertises the real address. The async-replication user is granted `@'%'`
+  (instead of `@'localhost'`) for cross-host slaves; admin and SST stay local.
+- **Backward compatible:** the `127.0.0.1` default is unchanged — single-host /
+  colocated output is byte-for-byte identical (covered by a regression test).
+
 ## [0.2.1] - 2026-08-07
 
 ### Fixed

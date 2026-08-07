@@ -119,6 +119,91 @@ def deploy_replication(tarball_path, master_instance_id, slaves=1):
     return result
 
 
+def deploy_master(tarball_path, master_instance_id, advertise="127.0.0.1"):
+    """Deploys + starts a replication master on THIS host (distributed).
+
+    Grants the replication user for remote slaves (`@'%'`) when advertising a
+    real IP. Records a single-node manifest entry.
+    """
+    master_id = int(master_instance_id)
+    tarball_name = deployment.resolve_tarball(tarball_path).name
+    deployed = []
+    try:
+        master_path = deployment.deploy_instance(
+            tarball_path, str(master_id), init_db=False
+        )
+        deployed.append(str(master_id))
+        deployment._generate_my_cnf(
+            str(master_id), master_path, extra_config={"log_slave_updates": True}
+        )
+        deployment.initialize_database(master_path)
+        master = Instance(str(master_id))
+        master.start()
+        _wait_for_instance(master)
+        repl_host = "localhost" if advertise == "127.0.0.1" else "%"
+        deployment.create_service_users(master, repl_host=repl_host)
+    except Exception:
+        report.error("Master deploy failed — rolling back.")
+        deployment.rollback_instances(deployed)
+        raise
+
+    result = model.DeploymentResult(
+        topology="replication", cluster_id=str(master_id), tarball=tarball_name,
+        nodes=[_node_info(master_id, "master", master_path)], created_at=_now(),
+    )
+    manifest.record(result)
+    report.success(f"Replication master {master_id} deployed (advertise {advertise}).")
+    return result
+
+
+def deploy_slave(tarball_path, slave_instance_id, master_host, master_port,
+                 advertise="127.0.0.1"):
+    """Deploys + starts a replication slave on THIS host and wires GTID
+    replication to a (possibly remote) master."""
+    slave_id = int(slave_instance_id)
+    master_port = int(master_port)
+    tarball_name = deployment.resolve_tarball(tarball_path).name
+    deployed = []
+    try:
+        slave_path = deployment.deploy_instance(
+            tarball_path, str(slave_id), init_db=False
+        )
+        deployed.append(str(slave_id))
+        deployment._generate_my_cnf(str(slave_id), slave_path, extra_config={
+            "log_slave_updates": True,
+            "read_only": "ON",
+            "relay_log": f"relay-bin.{slave_id}",
+        })
+        deployment.initialize_database(slave_path)
+        slave = Instance(str(slave_id))
+        slave.start()
+        _wait_for_instance(slave)
+        repl_host = "localhost" if advertise == "127.0.0.1" else "%"
+        deployment.create_service_users(slave, repl_host=repl_host)
+        slave.run_sql(
+            "CHANGE MASTER TO "
+            f"MASTER_HOST='{master_host}', "
+            f"MASTER_PORT={master_port}, "
+            f"MASTER_USER='{deployment.REPL_USER}', "
+            "MASTER_USE_GTID=slave_pos"
+        )
+        slave.run_sql("START SLAVE")
+    except Exception:
+        report.error("Slave deploy failed — rolling back.")
+        deployment.rollback_instances(deployed)
+        raise
+
+    result = model.DeploymentResult(
+        topology="replication", cluster_id=str(slave_id), tarball=tarball_name,
+        nodes=[_node_info(slave_id, "slave", slave_path)], created_at=_now(),
+    )
+    manifest.record(result)
+    report.success(
+        f"Replication slave {slave_id} wired to {master_host}:{master_port}."
+    )
+    return result
+
+
 def _node_info(instance_id, role, path):
     return model.NodeInfo(
         id=str(instance_id),

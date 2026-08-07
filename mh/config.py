@@ -86,6 +86,21 @@ def get_wsrep_provider():
     return config.get('DEFAULT', 'wsrep_provider', fallback=None) or None
 
 
+def get_advertise_address():
+    """The IP address this host advertises to Galera/replication peers.
+
+    Default 127.0.0.1 (single-host / colocated — keeps behaviour unchanged). Set
+    to the host's reachable IP for multi-host clusters (one node per VM), so
+    peers can reach this node's Galera and replication endpoints. Resolution:
+    MYHAREM_ADVERTISE_ADDRESS env, then `advertise_address` in the config file.
+    """
+    env_value = os.environ.get('MYHAREM_ADVERTISE_ADDRESS')
+    if env_value:
+        return env_value
+    config = get_config()
+    return config.get('DEFAULT', 'advertise_address', fallback='127.0.0.1')
+
+
 def setup_myharem_dirs():
     """Sets up the necessary directories for MyHarem."""
     basedir = get_basedir()
