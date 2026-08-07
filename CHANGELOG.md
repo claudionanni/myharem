@@ -16,6 +16,11 @@ All notable changes to MyHarem are documented here.
   resolved it arbitrarily — silently starting the wrong instance. `deploy`
   refuses an id already in use, and instance resolution raises on ambiguity
   instead of guessing.
+- **`erase --purge` no longer reports false success.** It used
+  `shutil.rmtree(..., ignore_errors=True)`, so a delete that removed nothing
+  (e.g. run without sudo against db-user-owned files) still printed "erased".
+  Purge now surfaces the real error and verifies the directory is actually
+  gone; the move-to-`erased/` path likewise reports failures.
 
 ### Added
 - `mh deploygalera --wsrep-provider PATH` (also `wsrep_provider` in the config

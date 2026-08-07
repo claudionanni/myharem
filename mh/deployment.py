@@ -145,13 +145,30 @@ def teardown_instance(instance_id, purge=False):
         pass
 
     if purge:
-        shutil.rmtree(inst.path, ignore_errors=True)
+        try:
+            shutil.rmtree(inst.path)
+        except OSError as exc:
+            raise click.ClickException(
+                f"Could not remove {inst.path}: {exc}\n"
+                f"(Instance files are owned by the db user — run with sudo?)"
+            )
+        if inst.path.exists():
+            raise click.ClickException(
+                f"Purge removed nothing — {inst.path} still exists "
+                f"(check permissions; run with sudo?)."
+            )
     else:
         erased = config.get_basedir() / 'erased' / inst.path.name
         erased.parent.mkdir(parents=True, exist_ok=True)
         if erased.exists():
             shutil.rmtree(erased, ignore_errors=True)
-        shutil.move(str(inst.path), str(erased))
+        try:
+            shutil.move(str(inst.path), str(erased))
+        except OSError as exc:
+            raise click.ClickException(
+                f"Could not move {inst.path} to {erased}: {exc}\n"
+                f"(Run with sudo?)"
+            )
 
 
 def _generate_my_cnf(instance_id, instance_path, extra_config=None):

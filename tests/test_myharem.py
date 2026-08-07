@@ -213,6 +213,24 @@ def test_deploy_instance_refuses_duplicate_id(basedir, monkeypatch):
         deployment.deploy_instance("mariadb-new.tar.gz", "39000", init_db=False)
 
 
+def test_purge_removes_directory(basedir):
+    d = basedir / "instances" / "v.51000"
+    (d / "data").mkdir(parents=True)
+    deployment.teardown_instance("51000", purge=True)
+    assert not d.exists()
+
+
+def test_purge_reports_failure_when_nothing_removed(basedir, monkeypatch):
+    d = basedir / "instances" / "v.52000"
+    (d / "data").mkdir(parents=True)
+    # Simulate a delete that can't remove the files (e.g. permission denied)
+    # without raising — the old ignore_errors=True path swallowed exactly this.
+    monkeypatch.setattr("shutil.rmtree", lambda *a, **k: None)
+    with pytest.raises(click.ClickException, match="Purge removed nothing"):
+        deployment.teardown_instance("52000", purge=True)
+    assert d.exists()  # untouched — and the caller was told, not misled
+
+
 # ---- CLI smoke ----
 
 def test_cli_help_lists_commands():
