@@ -428,7 +428,8 @@ def update():
     import tempfile
 
     repo_url = "https://github.com/claudionanni/myharem.git"
-    branch = "feature/python-refactor-and-new-features"
+    # Canonical branch is master; override with MYHAREM_UPDATE_BRANCH if needed.
+    branch = os.environ.get("MYHAREM_UPDATE_BRANCH", "master")
     click.echo(f"Updating MyHarem from {repo_url} ({branch})...")
 
     with tempfile.TemporaryDirectory() as tmpdir:
