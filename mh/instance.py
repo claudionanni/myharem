@@ -5,6 +5,7 @@ from pathlib import Path
 import click
 
 from . import config
+from . import report
 from .deployment import ADMIN_USER
 
 
@@ -279,7 +280,7 @@ class Instance:
         label = f"Starting instance {self.id}"
         if wsrep_new_cluster:
             label += " (Galera bootstrap)"
-        click.echo(f"{label}...")
+        report.log(f"{label}...")
 
     def stop(self):
         """Stops the MariaDB instance."""
@@ -301,13 +302,13 @@ class Instance:
 
         if process.returncode != 0:
             if "Can't connect" in process.stderr:
-                click.secho(f"Instance {self.id} is not running.", fg='yellow')
+                report.warn(f"Instance {self.id} is not running.")
             else:
                 raise click.ClickException(
                     f"Error stopping instance {self.id}:\n{process.stderr}"
                 )
         else:
-            click.secho(f"Instance {self.id} stopped successfully.", fg='green')
+            report.success(f"Instance {self.id} stopped successfully.")
 
     def scli(self):
         """Connects to the instance via socket using the mariadb client."""

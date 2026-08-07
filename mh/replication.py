@@ -1,9 +1,13 @@
 import time
+from datetime import datetime, timezone
+from pathlib import Path
 
 import click
 
-from . import config
 from . import deployment
+from . import manifest
+from . import model
+from . import report
 from .instance import Instance
 
 
@@ -12,151 +16,134 @@ WAIT_TIMEOUT = 30
 WAIT_INTERVAL = 1
 
 
-def deploy_replication(tarball_path, master_instance_id):
-    """Deploys a master/slave async replication pair using GTID.
+def _now():
+    return datetime.now(timezone.utc).isoformat()
 
-    Deploys two instances, starts them, and configures GTID-based
-    replication automatically.
 
-    Args:
-        tarball_path: Path to the MariaDB tarball.
-        master_instance_id: The ID for the master instance.
-            The slave will be master_id + 10000.
+def compute_slave_ids(master_instance_id, slaves):
+    """Returns the list of slave ids for a master + N slaves (pure)."""
+    master = int(master_instance_id)
+    return [master + i * REPL_STEP for i in range(1, int(slaves) + 1)]
+
+
+def deploy_replication(tarball_path, master_instance_id, slaves=1):
+    """Deploys a master + N async (GTID) slaves on a single host.
+
+    Slaves are placed at master_id + i*10000 (i = 1..N). Deploys and starts all
+    instances, wires GTID replication on each slave, records a DeploymentResult
+    in the manifest, and rolls back on failure.
     """
     master_id = int(master_instance_id)
-    slave_id = master_id + REPL_STEP
+    slaves = int(slaves)
+    if slaves < 1:
+        raise click.ClickException("Replication needs at least one slave.")
 
-    click.echo(f"Deploying replication: master={master_id}, slave={slave_id}")
-
-    # --- Deploy master ---
-    click.secho("\n=== Deploying Master ===", fg='cyan', bold=True)
-    master_path = deployment.deploy_instance(
-        tarball_path, str(master_id), init_db=False
-    )
-    if not master_path:
-        raise click.ClickException("Failed to deploy master instance")
-
-    master_extra = {
-        "log_slave_updates": True,
-    }
-    deployment._generate_my_cnf(str(master_id), master_path,
-                                extra_config=master_extra)
-    deployment.initialize_database(master_path)
-
-    # --- Deploy slave ---
-    click.secho("\n=== Deploying Slave ===", fg='cyan', bold=True)
-    slave_path = deployment.deploy_instance(
-        tarball_path, str(slave_id), init_db=False
-    )
-    if not slave_path:
-        raise click.ClickException("Failed to deploy slave instance")
-
-    slave_extra = {
-        "log_slave_updates": True,
-        "read_only": "ON",
-        "relay_log": f"relay-bin.{slave_id}",
-    }
-    deployment._generate_my_cnf(str(slave_id), slave_path,
-                                extra_config=slave_extra)
-    deployment.initialize_database(slave_path)
-
-    # --- Start both instances ---
-    click.secho("\n=== Starting Instances ===", fg='cyan', bold=True)
-
-    master = Instance(str(master_id))
-    slave = Instance(str(slave_id))
-
-    master.start()
-    _wait_for_instance(master)
-    deployment.create_service_users(master)
-
-    slave.start()
-    _wait_for_instance(slave)
-    deployment.create_service_users(slave)
-
-    # --- Configure replication ---
-    click.secho("\n=== Configuring GTID Replication ===", fg='cyan', bold=True)
-
-    change_master_sql = (
-        "CHANGE MASTER TO "
-        "MASTER_HOST='127.0.0.1', "
-        f"MASTER_PORT={master_id}, "
-        f"MASTER_USER='{deployment.REPL_USER}', "
-        "MASTER_USE_GTID=slave_pos"
+    slave_ids = compute_slave_ids(master_id, slaves)
+    report.log(
+        f"Deploying replication: master={master_id}, slaves={slave_ids}"
     )
 
-    click.echo(f"Running on slave: {change_master_sql}")
-    slave.run_sql(change_master_sql)
+    tarball_name = deployment.resolve_tarball(tarball_path).name
+    deployed = []
+    node_infos = []
+    try:
+        # --- Master ---
+        report.log("=== Deploying Master ===")
+        master_path = deployment.deploy_instance(
+            tarball_path, str(master_id), init_db=False
+        )
+        deployed.append(str(master_id))
+        deployment._generate_my_cnf(
+            str(master_id), master_path, extra_config={"log_slave_updates": True}
+        )
+        deployment.initialize_database(master_path)
+        node_infos.append(_node_info(master_id, "master", master_path))
 
-    click.echo("Starting slave...")
-    slave.run_sql("START SLAVE")
+        # --- Slaves ---
+        slave_paths = {}
+        for slave_id in slave_ids:
+            report.log(f"=== Deploying Slave {slave_id} ===")
+            slave_path = deployment.deploy_instance(
+                tarball_path, str(slave_id), init_db=False
+            )
+            deployed.append(str(slave_id))
+            deployment._generate_my_cnf(str(slave_id), slave_path, extra_config={
+                "log_slave_updates": True,
+                "read_only": "ON",
+                "relay_log": f"relay-bin.{slave_id}",
+            })
+            deployment.initialize_database(slave_path)
+            slave_paths[slave_id] = slave_path
+            node_infos.append(_node_info(slave_id, "slave", slave_path))
 
-    # --- Verify replication ---
-    click.secho("\n=== Verifying Replication ===", fg='cyan', bold=True)
-    time.sleep(2)
+        # --- Start + wire ---
+        report.log("=== Starting Master ===")
+        master = Instance(str(master_id))
+        master.start()
+        _wait_for_instance(master)
+        deployment.create_service_users(master)
 
-    output = slave.run_sql("SHOW SLAVE STATUS\\G")
-    _print_replication_status(output)
+        change_master_sql = (
+            "CHANGE MASTER TO "
+            "MASTER_HOST='127.0.0.1', "
+            f"MASTER_PORT={master_id}, "
+            f"MASTER_USER='{deployment.REPL_USER}', "
+            "MASTER_USE_GTID=slave_pos"
+        )
+        for slave_id in slave_ids:
+            report.log(f"=== Starting + wiring Slave {slave_id} ===")
+            slave = Instance(str(slave_id))
+            slave.start()
+            _wait_for_instance(slave)
+            deployment.create_service_users(slave)
+            slave.run_sql(change_master_sql)
+            slave.run_sql("START SLAVE")
+    except Exception:
+        report.error("Replication deploy failed — rolling back.")
+        deployment.rollback_instances(deployed)
+        raise
 
-    click.secho("\nReplication pair deployed successfully!", fg='green',
-                bold=True)
-    click.echo(f"  Master: {master_id}")
-    click.echo(f"  Slave:  {slave_id}")
-    click.echo(f"\nConnect to master: mh scli {master_id}")
-    click.echo(f"Connect to slave:  mh scli {slave_id}")
+    result = model.DeploymentResult(
+        topology="replication",
+        cluster_id=str(master_id),
+        tarball=tarball_name,
+        nodes=node_infos,
+        created_at=_now(),
+    )
+    manifest.record(result)
+
+    report.success(
+        f"Replication deployed: master {master_id} + {slaves} slave(s)."
+    )
+    report.log(f"Start/stop the whole set with:  sudo mh cluster start {master_id}")
+    return result
+
+
+def _node_info(instance_id, role, path):
+    return model.NodeInfo(
+        id=str(instance_id),
+        role=role,
+        port=int(instance_id),
+        socket=f"/tmp/mh-{instance_id}.sock",
+        datadir=str(Path(path) / "data"),
+        path=str(path),
+    )
 
 
 def _wait_for_instance(instance, timeout=WAIT_TIMEOUT):
-    """Waits for an instance to become ready.
-
-    Uses socket file existence as the readiness indicator, which works
-    even before service users are created (first start).
-
-    Args:
-        instance: Instance object to wait for.
-        timeout: Maximum seconds to wait.
-    """
-    click.echo(f"Waiting for instance {instance.id} to be ready...", nl=False)
+    """Waits for an instance socket to become ready; raises on timeout."""
+    report.log(f"Waiting for instance {instance.id} to be ready...", nl=False)
     elapsed = 0
     while elapsed < timeout:
         if instance.is_socket_ready():
-            click.secho(" OK", fg='green')
+            report.log(" OK", fg="green")
             return
-        click.echo(".", nl=False)
+        report.log(".", nl=False)
         time.sleep(WAIT_INTERVAL)
         elapsed += WAIT_INTERVAL
 
-    click.echo()
+    report.log("")
     raise click.ClickException(
         f"Instance {instance.id} did not start within {timeout}s. "
         f"Check log: mh log {instance.id}"
     )
-
-
-def _print_replication_status(show_slave_output):
-    """Parses and prints key fields from SHOW SLAVE STATUS output."""
-    fields_of_interest = [
-        'Slave_IO_Running',
-        'Slave_SQL_Running',
-        'Master_Host',
-        'Master_Port',
-        'Using_Gtid',
-        'Gtid_IO_Pos',
-        'Last_Error',
-        'Seconds_Behind_Master',
-    ]
-
-    for line in show_slave_output.splitlines():
-        line = line.strip()
-        for field in fields_of_interest:
-            if line.startswith(f"{field}:"):
-                value = line.split(':', 1)[1].strip()
-                if field == 'Slave_IO_Running' and value == 'Yes':
-                    click.secho(f"  {field}: {value}", fg='green')
-                elif field == 'Slave_SQL_Running' and value == 'Yes':
-                    click.secho(f"  {field}: {value}", fg='green')
-                elif field == 'Last_Error' and value:
-                    click.secho(f"  {field}: {value}", fg='red')
-                else:
-                    click.echo(f"  {field}: {value}")
-                break

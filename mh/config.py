@@ -43,6 +43,20 @@ def get_dbuser():
     return config.get('DEFAULT', 'dbuser', fallback='mysql')
 
 
+def get_sst_password():
+    """Gets the Galera SST password.
+
+    Resolution order: MYHAREM_SST_PASSWORD env, `sst_password` in the config
+    file, then the legacy default. Kept configurable so deployments can avoid
+    the hardcoded credential.
+    """
+    env_value = os.environ.get('MYHAREM_SST_PASSWORD')
+    if env_value:
+        return env_value
+    config = get_config()
+    return config.get('DEFAULT', 'sst_password', fallback='sstpwd')
+
+
 def setup_myharem_dirs():
     """Sets up the necessary directories for MyHarem."""
     basedir = get_basedir()

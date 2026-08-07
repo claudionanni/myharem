@@ -1,19 +1,47 @@
+import json
 import os
-import shutil
 
 import click
 
 from . import config
 from . import deployment
 from . import galera
+from . import manifest
+from . import report
 from . import service
 from .instance import Instance
 
 
 @click.group()
-def main():
+@click.option('--json', 'json_out', is_flag=True,
+              help='Emit machine-readable JSON results on stdout.')
+@click.pass_context
+def main(ctx, json_out):
     """MyHarem: A tool for managing local MariaDB instances."""
+    ctx.ensure_object(dict)
+    ctx.obj['json'] = json_out
+    report.set_json_mode(json_out)
     config.setup_myharem_dirs()
+
+
+def _emit_deploy(ctx, result):
+    """Writes a deploy result to stdout: JSON when --json, else a summary."""
+    if ctx.obj.get('json'):
+        click.echo(json.dumps(result.to_dict()))
+        return
+    click.echo(f"{result.topology} deployment '{result.cluster_id}' ready:")
+    for node in result.nodes:
+        click.echo(
+            f"  {node.id:<8} {node.role:<8} port={node.port} "
+            f"socket={node.socket}"
+        )
+
+
+def _emit_action(ctx, payload, human):
+    if ctx.obj.get('json'):
+        click.echo(json.dumps(payload))
+    else:
+        click.echo(human)
 
 
 # ---------- deploy ----------
@@ -21,22 +49,20 @@ def main():
 @main.command()
 @click.argument('tarball', required=False)
 @click.argument('instance_id', required=False)
-def deploy(tarball, instance_id):
-    """Deploys a new MariaDB instance (interactive if no args given)."""
+@click.pass_context
+def deploy(ctx, tarball, instance_id):
+    """Deploys a single MariaDB instance (interactive if no args given)."""
     if tarball and instance_id:
-        click.echo(f"Deploying {tarball} as instance {instance_id}")
-        deployment.deploy_instance(tarball, instance_id)
+        result = deployment.deploy_single(tarball, instance_id)
+        _emit_deploy(ctx, result)
         return
-
-    # --- Interactive wizard ---
-    _deploy_wizard()
+    _deploy_wizard(ctx)
 
 
-def _deploy_wizard():
+def _deploy_wizard(ctx):
     """Interactive deployment wizard: pick tarball, type, and instance ID."""
     from . import replication
 
-    # 1. Pick tarball from local/
     local_dir = config.get_basedir() / 'local'
     if not local_dir.exists():
         raise click.ClickException(
@@ -54,34 +80,32 @@ def _deploy_wizard():
     tarball = tarballs[choice - 1]
     click.echo(f"  → {tarball.name}")
 
-    # 2. Pick deployment type
     deploy_types = ['single', 'replica', 'galera']
     click.echo("\nDeployment type:")
-    for i, dt in enumerate(deploy_types, 1):
-        if dt == 'single':
-            click.echo(f"  [{i}] Single instance")
-        elif dt == 'replica':
-            click.echo(f"  [{i}] Async replication (master + slave)")
-        elif dt == 'galera':
-            click.echo(f"  [{i}] Galera cluster (3 nodes)")
-
+    click.echo("  [1] Single instance")
+    click.echo("  [2] Async replication (master + slaves)")
+    click.echo("  [3] Galera cluster")
     dtype_choice = click.prompt(
         "\nSelect type", type=click.IntRange(1, len(deploy_types))
     )
     deploy_type = deploy_types[dtype_choice - 1]
 
-    # 3. Pick instance ID
     instance_id = click.prompt("\nInstance ID (base port)", type=int)
 
-    # 4. Check for ID conflicts
-    existing = {inst.id for inst in Instance.get_all_instances()}
+    count = 1
+    if deploy_type == 'galera':
+        count = click.prompt("Number of Galera nodes", type=int, default=3)
+    elif deploy_type == 'replica':
+        count = click.prompt("Number of slaves", type=int, default=1)
 
+    existing = {inst.id for inst in Instance.get_all_instances()}
     if deploy_type == 'single':
         needed_ids = [instance_id]
     elif deploy_type == 'replica':
-        needed_ids = [instance_id, instance_id + 10000]
-    elif deploy_type == 'galera':
-        needed_ids = [instance_id, instance_id + 10000, instance_id + 20000]
+        needed_ids = [instance_id] + [instance_id + 10000 * i
+                                      for i in range(1, count + 1)]
+    else:  # galera
+        needed_ids = [instance_id + 10000 * i for i in range(count)]
 
     conflicts = [str(nid) for nid in needed_ids if str(nid) in existing]
     if conflicts:
@@ -89,7 +113,6 @@ def _deploy_wizard():
             f"Instance ID(s) already exist: {', '.join(conflicts)}"
         )
 
-    # 5. Confirm
     click.echo(f"\n  Tarball: {tarball.name}")
     click.echo(f"  Type:    {deploy_type}")
     click.echo(f"  IDs:     {', '.join(str(i) for i in needed_ids)}")
@@ -97,13 +120,15 @@ def _deploy_wizard():
         click.echo("Aborted.")
         return
 
-    # 6. Deploy
     if deploy_type == 'single':
-        deployment.deploy_instance(str(tarball), str(instance_id))
+        result = deployment.deploy_single(str(tarball), str(instance_id))
     elif deploy_type == 'replica':
-        replication.deploy_replication(str(tarball), str(instance_id))
-    elif deploy_type == 'galera':
-        galera.deploy_cluster(str(tarball), str(instance_id))
+        result = replication.deploy_replication(
+            str(tarball), str(instance_id), slaves=count
+        )
+    else:
+        result = galera.deploy_cluster(str(tarball), str(instance_id), nodes=count)
+    _emit_deploy(ctx, result)
 
 
 # ---------- deploygalera ----------
@@ -111,9 +136,13 @@ def _deploy_wizard():
 @main.command()
 @click.argument('tarball')
 @click.argument('first_instance_id')
-def deploygalera(tarball, first_instance_id):
-    """Deploys a 3-node Galera cluster."""
-    galera.deploy_cluster(tarball, first_instance_id)
+@click.option('--nodes', default=3, type=int, show_default=True,
+              help='Number of Galera nodes.')
+@click.pass_context
+def deploygalera(ctx, tarball, first_instance_id, nodes):
+    """Deploys an N-node Galera cluster (default 3)."""
+    result = galera.deploy_cluster(tarball, first_instance_id, nodes=nodes)
+    _emit_deploy(ctx, result)
 
 
 # ---------- deployreplication ----------
@@ -121,74 +150,139 @@ def deploygalera(tarball, first_instance_id):
 @main.command()
 @click.argument('tarball')
 @click.argument('instance_id')
-def deployreplication(tarball, instance_id):
-    """Deploys a master/slave async replication pair (GTID)."""
+@click.option('--slaves', default=1, type=int, show_default=True,
+              help='Number of slaves.')
+@click.pass_context
+def deployreplication(ctx, tarball, instance_id, slaves):
+    """Deploys a master + N async (GTID) slaves."""
     from . import replication
-    replication.deploy_replication(tarball, instance_id)
+    result = replication.deploy_replication(tarball, instance_id, slaves=slaves)
+    _emit_deploy(ctx, result)
 
 
-# ---------- list ----------
+# ---------- list / status ----------
+
+def _collect_status():
+    rows = []
+    for inst in Instance.get_all_instances():
+        rows.append({
+            'id': inst.id,
+            'status': inst.get_status(),
+            'path': str(inst.path) if inst.path else None,
+        })
+    return sorted(rows, key=lambda r: int(r['id']) if r['id'].isdigit() else 0)
+
+
+def _print_status_human(rows):
+    if not rows:
+        click.echo("No instances found.")
+        return
+    from collections import defaultdict
+    groups = defaultdict(list)
+    for row in rows:
+        dirname = os.path.basename(row['path']) if row['path'] else "unknown"
+        base = dirname.rsplit('.', 1)[0] if '.' in dirname else dirname
+        groups[base].append(row)
+    for base in sorted(groups):
+        click.secho(f"\n  {base}", bold=True)
+        for row in groups[base]:
+            color = 'green' if row['status'] == 'Running' else 'red'
+            click.echo(f"    {row['id']:<10} ", nl=False)
+            click.secho(row['status'], fg=color)
+
 
 @main.command(name='list')
-def list_command():
+@click.pass_context
+def list_command(ctx):
     """Lists all deployed instances and their status."""
-    _list_instances()
+    rows = _collect_status()
+    if ctx.obj.get('json'):
+        click.echo(json.dumps({
+            'instances': rows,
+            'deployments': manifest.all_deployments(),
+        }))
+    else:
+        _print_status_human(rows)
 
 
 # ---------- service ----------
 
 @main.group(name='service')
 def service_group():
-    """Manages MariaDB services."""
-    pass
+    """Manages MariaDB services (single instances)."""
 
 
 @service_group.command()
 @click.argument('instance_id')
 @click.option('--bootstrap', is_flag=True,
               help='Galera: bootstrap a new cluster from this node.')
-def start(instance_id, bootstrap):
+@click.pass_context
+def start(ctx, instance_id, bootstrap):
     """Starts a MariaDB instance."""
     service.start_instance(instance_id, bootstrap=bootstrap)
+    _emit_action(ctx, {'instance': instance_id, 'action': 'start', 'ok': True},
+                 f"Instance {instance_id} started.")
 
 
 @service_group.command()
 @click.argument('instance_id')
-def stop(instance_id):
+@click.pass_context
+def stop(ctx, instance_id):
     """Stops a MariaDB instance."""
     service.stop_instance(instance_id)
-
-
-def _list_instances():
-    """Prints a table of all deployed instances grouped by tarball version."""
-    instances = Instance.get_all_instances()
-    if not instances:
-        click.echo("No instances found.")
-        return
-
-    # Group by base directory name (tarball version)
-    from collections import defaultdict
-    groups = defaultdict(list)
-    for inst in instances:
-        dirname = os.path.basename(inst.path) if inst.path else "unknown"
-        # Base name is everything before the last dot (instance ID)
-        base = dirname.rsplit('.', 1)[0] if '.' in dirname else dirname
-        groups[base].append(inst)
-
-    # Sort groups by name, instances within each group by ID
-    for base in sorted(groups):
-        click.secho(f"\n  {base}", bold=True)
-        for inst in sorted(groups[base], key=lambda i: int(i.id)):
-            status = inst.get_status()
-            color = 'green' if status == 'Running' else 'red'
-            click.echo(f"    {inst.id:<10} ", nl=False)
-            click.secho(status, fg=color)
+    _emit_action(ctx, {'instance': instance_id, 'action': 'stop', 'ok': True},
+                 f"Instance {instance_id} stopped.")
 
 
 @service_group.command(name='status')
-def status_command():
+@click.pass_context
+def status_command(ctx):
     """Shows the status of all deployed instances."""
-    _list_instances()
+    rows = _collect_status()
+    if ctx.obj.get('json'):
+        click.echo(json.dumps({'instances': rows}))
+    else:
+        _print_status_human(rows)
+
+
+# ---------- cluster (whole-deployment lifecycle) ----------
+
+@main.group(name='cluster')
+def cluster_group():
+    """Manage a whole deployment (all nodes) by its cluster id."""
+
+
+@cluster_group.command(name='start')
+@click.argument('cluster_id')
+def cluster_start(cluster_id):
+    """Starts every node of a deployment in the correct order."""
+    service.start_cluster(cluster_id)
+
+
+@cluster_group.command(name='stop')
+@click.argument('cluster_id')
+def cluster_stop(cluster_id):
+    """Stops every node of a deployment."""
+    service.stop_cluster(cluster_id)
+
+
+@cluster_group.command(name='erase')
+@click.argument('cluster_id')
+@click.option('--yes', is_flag=True, help='Skip the confirmation prompt.')
+@click.option('--purge', is_flag=True,
+              help='Delete data instead of moving to erased/.')
+def cluster_erase(cluster_id, yes, purge):
+    """Stops and removes every node of a deployment."""
+    if not yes:
+        entry = manifest.get(cluster_id)
+        count = len(entry.get('nodes', [])) if entry else 0
+        if not click.confirm(
+            f"Erase deployment '{cluster_id}' ({count} nodes)? Data will be "
+            f"{'deleted' if purge else 'moved to erased/'}."
+        ):
+            click.echo("Aborted.")
+            return
+    service.erase_cluster(cluster_id, purge=purge)
 
 
 # ---------- scli / cli ----------
@@ -210,11 +304,9 @@ def cli(instance_id):
 # ---------- cd / chdir ----------
 
 def _go_to_instance_dir(instance_id, open_shell=False):
-    """Outputs instance path or opens a subshell in the instance directory."""
     instance = Instance(instance_id)
     instance._require_exists()
     instance_path = str(instance.path)
-
     if open_shell:
         shell = os.environ.get('SHELL', '/bin/bash')
         os.chdir(instance_path)
@@ -234,8 +326,7 @@ def cd_command(instance_id, open_shell):
 
 @main.command(name='chdir', hidden=True)
 @click.argument('instance_id')
-@click.option('--shell', 'open_shell', is_flag=True,
-              help='Open a subshell in the instance directory.')
+@click.option('--shell', 'open_shell', is_flag=True)
 def chdir_command(instance_id, open_shell):
     """Alias for 'mh cd'."""
     _go_to_instance_dir(instance_id, open_shell=open_shell)
@@ -251,9 +342,7 @@ def log(instance_id, lines, level):
     """Shows the latest log entries for an instance."""
     instance = Instance(instance_id)
     instance._require_exists()
-
-    entries = instance.get_log_entries(num_lines=lines, level=level)
-    for entry in entries:
+    for entry in instance.get_log_entries(num_lines=lines, level=level):
         click.echo(entry)
 
 
@@ -261,62 +350,49 @@ def log(instance_id, lines, level):
 
 @main.command()
 @click.argument('variable_name')
-def var(variable_name):
+@click.pass_context
+def var(ctx, variable_name):
     """Extracts a server variable from all running instances."""
     instances = Instance.get_all_instances()
-    if not instances:
+    values = {inst.id: inst.get_variable(variable_name) for inst in instances}
+    if ctx.obj.get('json'):
+        click.echo(json.dumps({'variable': variable_name, 'values': values}))
+        return
+    if not values:
         click.echo("No instances found.")
         return
-
     click.echo(f"Variable '{variable_name}':")
-    for inst in instances:
-        value = inst.get_variable(variable_name)
-        click.echo(f"  [{inst.id}] {value}")
+    for inst_id, value in values.items():
+        click.echo(f"  [{inst_id}] {value}")
 
 
 # ---------- erase ----------
 
 @main.command()
 @click.argument('instance_id')
-def erase(instance_id):
-    """Removes an instance completely. ALL DATA WILL BE LOST."""
+@click.option('--yes', is_flag=True, help='Skip the confirmation prompt.')
+@click.option('--purge', is_flag=True,
+              help='Delete data instead of moving to erased/.')
+def erase(instance_id, yes, purge):
+    """Removes a single instance (moves to erased/, or --purge to delete)."""
     instance = Instance(instance_id)
     instance._require_exists()
 
-    basedir = config.get_basedir()
-    erased_dir = basedir / 'erased'
+    if not yes:
+        click.secho(f"WARNING: Instance {instance_id} will be erased!",
+                    fg='red', bold=True)
+        click.echo(f"  Path: {instance.path}")
+        datadir = instance.path / 'data'
+        if datadir.exists():
+            total = sum(f.stat().st_size for f in datadir.rglob('*')
+                        if f.is_file())
+            click.echo(f"  Data size: {total / 1024 / 1024:.1f} MB")
+        if not click.confirm("Are you sure?"):
+            click.echo("Aborted.")
+            return
 
-    click.secho(f"WARNING: Instance {instance_id} will be erased!", fg='red',
-                bold=True)
-    click.echo(f"  Path: {instance.path}")
-
-    # Show datadir size if possible
-    datadir = instance.path / 'data'
-    if datadir.exists():
-        total = sum(
-            f.stat().st_size for f in datadir.rglob('*') if f.is_file()
-        )
-        click.echo(f"  Data size: {total / 1024 / 1024:.1f} MB")
-
-    if not click.confirm("Are you sure?"):
-        click.echo("Aborted.")
-        return
-
-    if not click.confirm("Are you REALLY sure? All data will be wiped!"):
-        click.echo("Aborted.")
-        return
-
-    # Stop instance if running
-    if instance.is_running():
-        click.echo("Stopping instance first...")
-        instance.stop()
-
-    # Move to erased directory
-    dest = erased_dir / os.path.basename(instance.path)
-    click.echo(f"Moving to {dest}...")
-    shutil.move(str(instance.path), str(dest))
-
-    click.secho(f"Instance {instance_id} erased.", fg='green')
+    deployment.teardown_instance(instance_id, purge=purge)
+    report.success(f"Instance {instance_id} erased.")
 
 
 # ---------- show ----------
@@ -324,7 +400,23 @@ def erase(instance_id):
 @main.group()
 def show():
     """Lists available tarballs (local or remote)."""
-    pass
+
+
+@show.command(name='local')
+def show_local():
+    """Lists locally available tarballs."""
+    local_dir = config.get_basedir() / 'local'
+    if not local_dir.exists():
+        click.echo("No local tarball directory found.")
+        return
+    tarballs = sorted(local_dir.glob('*.tar.gz'))
+    if not tarballs:
+        click.echo("No local tarballs found.")
+        return
+    click.echo("Available local tarballs:")
+    click.echo("=" * 40)
+    for i, t in enumerate(tarballs, 1):
+        click.echo(f"  [L{i}] {t.name}")
 
 
 # ---------- update ----------
@@ -337,70 +429,24 @@ def update():
 
     repo_url = "https://github.com/claudionanni/myharem.git"
     branch = "feature/python-refactor-and-new-features"
-
     click.echo(f"Updating MyHarem from {repo_url} ({branch})...")
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        # Clone the repo
         click.echo("Cloning repository...")
         result = subprocess.run(
-            ['git', 'clone', '--depth=1', '--branch', branch,
-             repo_url, tmpdir],
+            ['git', 'clone', '--depth=1', '--branch', branch, repo_url, tmpdir],
             capture_output=True, text=True,
         )
         if result.returncode != 0:
             raise click.ClickException(
                 f"Failed to clone repository:\n{result.stderr}"
             )
-
-        # Install with --force-reinstall
         click.echo("Installing...")
         result = subprocess.run(
             ['pip', 'install', '--force-reinstall', '--no-deps', '.'],
             capture_output=True, text=True, cwd=tmpdir,
         )
         if result.returncode != 0:
-            raise click.ClickException(
-                f"Failed to install:\n{result.stderr}"
-            )
+            raise click.ClickException(f"Failed to install:\n{result.stderr}")
 
     click.secho("MyHarem updated successfully!", fg='green')
-
-
-@show.command(name='local')
-def show_local():
-    """Lists locally available tarballs."""
-    local_dir = config.get_basedir() / 'local'
-    if not local_dir.exists():
-        click.echo("No local tarball directory found.")
-        return
-
-    tarballs = sorted(local_dir.glob('*.tar.gz'))
-    if not tarballs:
-        click.echo("No local tarballs found.")
-        return
-
-    click.echo("Available local tarballs:")
-    click.echo("=" * 40)
-    for i, t in enumerate(tarballs, 1):
-        click.echo(f"  [L{i}] {t.name}")
-
-
-@show.command(name='remote')
-def show_remote():
-    """Lists remotely available tarballs."""
-    remote_list = config.get_basedir() / 'remote' / 'list'
-    if not remote_list.exists():
-        click.echo("No remote list found. Run 'mh tarballs' to fetch it.")
-        return
-
-    click.echo("Available remote tarballs:")
-    click.echo("=" * 40)
-    with open(remote_list) as f:
-        for line in f:
-            line = line.strip()
-            if '|' in line:
-                parts = line.split('|')
-                if len(parts) >= 3:
-                    click.echo(f"  [{parts[0]}] {parts[1]}")
-                    click.echo(f"         {parts[2]}")
