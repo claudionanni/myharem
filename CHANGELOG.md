@@ -2,6 +2,21 @@
 
 All notable changes to MyHarem are documented here.
 
+## [0.2.1] - 2026-08-07
+
+### Fixed
+- Galera deploy now **fails immediately with a clear message** when the tarball
+  does not bundle the Galera provider (`libgalera_smm.so`), instead of writing a
+  dead `wsrep_provider` path that only failed cryptically at server start-up.
+  The generic `linux-x86_64` tarballs omit the provider; `linux-systemd-x86_64`
+  and Enterprise `rhel-*` tarballs bundle it.
+
+### Added
+- `mh deploygalera --wsrep-provider PATH` (also `wsrep_provider` in the config
+  and the `MYHAREM_WSREP_PROVIDER` env) to supply the Galera provider for
+  tarballs that don't bundle it. Error output hints at a detected system
+  provider when one is present.
+
 ## [0.2.0] - 2026-08-07
 
 Professionalization pass — MyHarem becomes scriptable and safe to drive from

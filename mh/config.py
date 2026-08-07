@@ -71,6 +71,21 @@ def get_admin_password():
     return config.get('DEFAULT', 'admin_password', fallback='')
 
 
+def get_wsrep_provider():
+    """Path to the Galera provider library (libgalera_smm.so), if configured.
+
+    Resolution: MYHAREM_WSREP_PROVIDER env, then `wsrep_provider` in the config
+    file, then None. Used as an override for MariaDB builds that do not bundle
+    the Galera provider (e.g. the generic 'linux-x86_64' tarballs); binary
+    'linux-systemd' and Enterprise 'rhel-*' tarballs ship it and need no override.
+    """
+    env_value = os.environ.get('MYHAREM_WSREP_PROVIDER')
+    if env_value:
+        return env_value
+    config = get_config()
+    return config.get('DEFAULT', 'wsrep_provider', fallback=None) or None
+
+
 def setup_myharem_dirs():
     """Sets up the necessary directories for MyHarem."""
     basedir = get_basedir()

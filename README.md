@@ -31,6 +31,8 @@ dbuser=mysql
 # optional credentials (see Service Users)
 admin_password=
 sst_password=sstpwd
+# optional: Galera provider for tarballs that don't bundle it (see Galera notes)
+# wsrep_provider=/path/to/libgalera_smm.so
 ```
 
 The first run creates the directory tree under `basedir`:
@@ -87,16 +89,41 @@ sudo mh deploy mariadb-11.8.6-linux-x86_64.tar.gz 18000   # found in local/
 
 - `mh deploy` — interactive wizard (pick tarball, type, IDs).
 - `mh deploy <tarball> <id>` — single instance (non-interactive).
-- `mh deploygalera <tarball> <first_id> [--nodes N]` — N-node Galera cluster
-  (default 3). Nodes are placed at `first_id`, `first_id+10000`, … Start the
-  whole cluster with `mh cluster start <first_id>`.
+- `mh deploygalera <tarball> <first_id> [--nodes N] [--wsrep-provider PATH]` —
+  N-node Galera cluster (default 3). Nodes are placed at `first_id`,
+  `first_id+10000`, … Start the whole cluster with `mh cluster start <first_id>`.
+  See **Galera provider** below for `--wsrep-provider`.
 - `mh deployreplication <tarball> <master_id> [--slaves N]` — master + N GTID
   slaves (default 1). Slaves at `master_id + i*10000`.
 
 ```bash
-sudo mh deploygalera mariadb-11.8.6-linux-x86_64.tar.gz 12000 --nodes 5
-sudo mh deployreplication mariadb-11.8.6-linux-x86_64.tar.gz 18000 --slaves 2
+sudo mh deploygalera mariadb-11.8.6-linux-systemd-x86_64.tar.gz 12000 --nodes 5
+sudo mh deployreplication mariadb-11.8.6-linux-systemd-x86_64.tar.gz 18000 --slaves 2
 ```
+
+#### Galera provider (`libgalera_smm.so`)
+
+Galera needs the provider library. **Which tarballs bundle it:**
+
+| Tarball flavor | Bundles Galera? |
+|---|---|
+| `mariadb-*-linux-systemd-x86_64` (CS binary) | ✅ `lib/galera/libgalera_smm.so` |
+| `mariadb-enterprise-*-rhel-*` (ES binary) | ✅ `lib/libgalera_enterprise_smm.so` |
+| `mariadb-*-linux-x86_64` (generic glibc) | ❌ **not bundled** |
+| source / RPM-bundle tarballs | ❌ not a bindist |
+
+MyHarem auto-detects the library inside the tarball. If it isn't there, the
+deploy **fails immediately with a clear message** (rather than a cryptic
+start-up crash). For a tarball that doesn't bundle it, point at one yourself —
+e.g. from a matching `linux-systemd` tarball or a system `galera-4` install:
+
+```bash
+sudo mh deploygalera mariadb-11.8.6-linux-x86_64.tar.gz 12000 \
+    --wsrep-provider /usr/lib64/galera-4/libgalera_smm.so
+```
+
+Or set it once via `wsrep_provider` in the config or `MYHAREM_WSREP_PROVIDER`.
+The provider's Galera version must be compatible with the server.
 
 ### Cluster lifecycle (whole deployment)
 

@@ -9,6 +9,7 @@ import getpass
 import json
 from pathlib import Path
 
+import click
 import pytest
 from click.testing import CliRunner
 
@@ -31,7 +32,9 @@ def stub_deploy(basedir, monkeypatch):
     """Stub the infra steps (extract/init) so deploys need no real MariaDB."""
     def fake_deploy_instance(tarball, instance_id, init_db=True):
         path = basedir / "instances" / f"fake-11.8.6.{instance_id}"
-        path.mkdir(parents=True, exist_ok=True)
+        # Simulate a tarball that bundles the Galera provider under lib/galera/.
+        (path / "lib" / "galera").mkdir(parents=True, exist_ok=True)
+        (path / "lib" / "galera" / "libgalera_smm.so").write_text("")
         return path
 
     monkeypatch.setattr(deployment, "deploy_instance", fake_deploy_instance)
@@ -111,6 +114,60 @@ def test_deploy_galera_rolls_back_on_failure(stub_deploy, basedir, monkeypatch):
     # first node dir should have been rolled back (purged)
     assert not (basedir / "instances" / "fake-11.8.6.20000").exists()
     assert manifest.get("20000") is None
+
+
+# ---- galera provider resolution (the linux-x86_64 "no bundled Galera" bug) ----
+
+def _bare_instance_stub(basedir, monkeypatch):
+    """Stub deploy_instance to produce an instance whose tarball did NOT bundle
+    the Galera provider (a lib/ with no libgalera*.so)."""
+    def bare_deploy_instance(tarball, instance_id, init_db=True):
+        path = basedir / "instances" / f"bare.{instance_id}"
+        (path / "lib").mkdir(parents=True, exist_ok=True)
+        return path
+    monkeypatch.setattr(deployment, "deploy_instance", bare_deploy_instance)
+    monkeypatch.setattr(deployment, "initialize_database", lambda p: None)
+    monkeypatch.setattr(
+        deployment, "resolve_tarball", lambda t: Path("bare.tar.gz")
+    )
+
+
+def test_galera_deploy_fails_loudly_when_provider_absent(basedir, monkeypatch):
+    _bare_instance_stub(basedir, monkeypatch)
+    with pytest.raises(click.ClickException, match="No Galera provider"):
+        galera.deploy_cluster("bare.tar.gz", "20000", nodes=1)
+    # nothing recorded; the partial node is rolled back rather than left broken
+    assert manifest.get("20000") is None
+    assert not (basedir / "instances" / "bare.20000").exists()
+
+
+def test_galera_honors_wsrep_provider_override(basedir, tmp_path, monkeypatch):
+    _bare_instance_stub(basedir, monkeypatch)
+    provider = tmp_path / "libgalera_smm.so"  # supplied out-of-band
+    provider.write_text("")
+    result = galera.deploy_cluster(
+        "bare.tar.gz", "20000", nodes=1, wsrep_provider=str(provider)
+    )
+    assert result.topology == "galera"
+    my_cnf = Path(result.nodes[0].path) / "my.cnf"
+    assert f"wsrep_provider={provider}" in my_cnf.read_text()
+
+
+def test_wsrep_provider_override_missing_path_errors(basedir, monkeypatch):
+    _bare_instance_stub(basedir, monkeypatch)
+    with pytest.raises(click.ClickException, match="does not exist"):
+        galera.deploy_cluster(
+            "bare.tar.gz", "20000", nodes=1,
+            wsrep_provider="/nope/libgalera_smm.so",
+        )
+
+
+def test_wsrep_provider_config_resolution(monkeypatch):
+    monkeypatch.setenv("MYHAREM_WSREP_PROVIDER", "/opt/galera/libgalera_smm.so")
+    assert config.get_wsrep_provider() == "/opt/galera/libgalera_smm.so"
+    monkeypatch.delenv("MYHAREM_WSREP_PROVIDER", raising=False)
+    monkeypatch.setenv("MYHAREM_CONF", "/nonexistent/myharem.conf")
+    assert config.get_wsrep_provider() is None
 
 
 # ---- replication deploy orchestration ----

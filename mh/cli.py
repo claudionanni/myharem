@@ -127,7 +127,10 @@ def _deploy_wizard(ctx):
             str(tarball), str(instance_id), slaves=count
         )
     else:
-        result = galera.deploy_cluster(str(tarball), str(instance_id), nodes=count)
+        result = galera.deploy_cluster(
+            str(tarball), str(instance_id), nodes=count,
+            wsrep_provider=config.get_wsrep_provider(),
+        )
     _emit_deploy(ctx, result)
 
 
@@ -138,10 +141,17 @@ def _deploy_wizard(ctx):
 @click.argument('first_instance_id')
 @click.option('--nodes', default=3, type=int, show_default=True,
               help='Number of Galera nodes.')
+@click.option('--wsrep-provider', 'wsrep_provider', default=None,
+              metavar='PATH',
+              help='Path to libgalera_smm.so, for tarballs that do not bundle '
+                   'Galera (e.g. generic linux-x86_64 builds). Overrides '
+                   'wsrep_provider / MYHAREM_WSREP_PROVIDER.')
 @click.pass_context
-def deploygalera(ctx, tarball, first_instance_id, nodes):
+def deploygalera(ctx, tarball, first_instance_id, nodes, wsrep_provider):
     """Deploys an N-node Galera cluster (default 3)."""
-    result = galera.deploy_cluster(tarball, first_instance_id, nodes=nodes)
+    provider = wsrep_provider or config.get_wsrep_provider()
+    result = galera.deploy_cluster(tarball, first_instance_id, nodes=nodes,
+                                   wsrep_provider=provider)
     _emit_deploy(ctx, result)
 
 
