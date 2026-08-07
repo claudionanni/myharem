@@ -10,6 +10,12 @@ All notable changes to MyHarem are documented here.
   dead `wsrep_provider` path that only failed cryptically at server start-up.
   The generic `linux-x86_64` tarballs omit the provider; `linux-systemd-x86_64`
   and Enterprise `rhel-*` tarballs bundle it.
+- **Duplicate instance ids are now caught.** Ids map 1:1 to ports/sockets, but
+  deploying the same id for two different tarball versions created two
+  directories sharing the id, and instance lookup (`os.listdir` order) then
+  resolved it arbitrarily — silently starting the wrong instance. `deploy`
+  refuses an id already in use, and instance resolution raises on ambiguity
+  instead of guessing.
 
 ### Added
 - `mh deploygalera --wsrep-provider PATH` (also `wsrep_provider` in the config

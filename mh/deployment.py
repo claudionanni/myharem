@@ -48,6 +48,22 @@ def deploy_instance(tarball_path, instance_id, init_db=True):
     instance_name = f"{dirname}.{instance_id}"
     instance_path = instances_dir / instance_name
 
+    # Ids map 1:1 to ports/sockets, so refuse to create a second instance with
+    # an id already claimed by another directory (e.g. a different version) —
+    # that would make id resolution ambiguous and start the wrong instance.
+    if instances_dir.exists():
+        clashing = sorted(
+            p.name for p in instances_dir.iterdir()
+            if p.name.endswith(f".{instance_id}") and p.name != instance_name
+        )
+        if clashing:
+            raise click.ClickException(
+                f"Instance id {instance_id} is already in use by: "
+                f"{', '.join(clashing)}.\n"
+                f"Erase it first (mh erase {instance_id} --purge) or choose "
+                f"another id — ids must be unique."
+            )
+
     report.log(f"[1/4] Creating instance directory: {instance_name}")
     instance_path.mkdir(parents=True, exist_ok=True)
 

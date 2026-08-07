@@ -17,13 +17,30 @@ class Instance:
         self.path = self._find_path()
 
     def _find_path(self):
-        """Finds the path to the instance directory."""
+        """Finds the instance directory by its id suffix.
+
+        Instance ids map 1:1 to ports and sockets, so an id must be unique. If
+        more than one directory claims the same id (e.g. the same id deployed
+        for two different tarball versions), fail loudly — picking one
+        arbitrarily silently operates on the wrong instance.
+        """
         instances_dir = config.get_basedir() / 'instances'
         if not instances_dir.exists():
             return None
-        for name in os.listdir(instances_dir):
-            if name.endswith(f".{self.id}"):
-                return instances_dir / name
+        matches = sorted(
+            name for name in os.listdir(instances_dir)
+            if name.endswith(f".{self.id}")
+        )
+        if len(matches) > 1:
+            listing = "\n  ".join(matches)
+            raise click.ClickException(
+                f"Ambiguous instance id '{self.id}' — {len(matches)} instances "
+                f"share it:\n  {listing}\n"
+                f"Ids must be unique (they map to ports/sockets). Remove the "
+                f"stale directory so the id resolves to exactly one instance."
+            )
+        if matches:
+            return instances_dir / matches[0]
         return None
 
     def exists(self):

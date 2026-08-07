@@ -189,6 +189,30 @@ def test_deploy_replication_records_result(stub_deploy, monkeypatch):
     assert manifest.get("3000")["topology"] == "replication"
 
 
+# ---- instance id uniqueness (the duplicate-.39000 resolution bug) ----
+
+def test_instance_id_resolution_is_unambiguous(basedir):
+    from mh.instance import Instance
+    insts = basedir / "instances"
+    (insts / "mariadb-11.4.7.39000").mkdir(parents=True)
+    (insts / "mariadb-11.8.5.39000").mkdir(parents=True)
+    # two dirs share id 39000 -> must fail loudly, not pick one arbitrarily
+    with pytest.raises(click.ClickException, match="Ambiguous instance id"):
+        Instance("39000")
+    # a unique id still resolves cleanly
+    (insts / "mariadb-11.4.7.19000").mkdir(parents=True)
+    assert Instance("19000").path.name == "mariadb-11.4.7.19000"
+
+
+def test_deploy_instance_refuses_duplicate_id(basedir, monkeypatch):
+    (basedir / "instances" / "old-version.39000").mkdir(parents=True)
+    monkeypatch.setattr(
+        deployment, "resolve_tarball", lambda t: Path("mariadb-new.tar.gz")
+    )
+    with pytest.raises(click.ClickException, match="already in use"):
+        deployment.deploy_instance("mariadb-new.tar.gz", "39000", init_db=False)
+
+
 # ---- CLI smoke ----
 
 def test_cli_help_lists_commands():
