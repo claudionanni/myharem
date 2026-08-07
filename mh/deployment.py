@@ -209,14 +209,15 @@ def initialize_database(instance_path):
 ADMIN_USER = 'myharem'
 REPL_USER = 'mh_repl'
 SST_USER = 'mh_sst'
-# SST password: overridable via config/env; default kept for backward compat.
+# Credentials: overridable via config/env; defaults kept for backward compat.
 SST_PASSWORD = config.get_sst_password()
+ADMIN_PASSWORD = config.get_admin_password()
 
 
 def _create_users_sql():
     return (
         f"CREATE USER IF NOT EXISTS '{ADMIN_USER}'@'localhost';\n"
-        f"ALTER USER '{ADMIN_USER}'@'localhost' IDENTIFIED BY '';\n"
+        f"ALTER USER '{ADMIN_USER}'@'localhost' IDENTIFIED BY '{ADMIN_PASSWORD}';\n"
         f"GRANT ALL PRIVILEGES ON *.* TO '{ADMIN_USER}'@'localhost' "
         f"WITH GRANT OPTION;\n"
         f"CREATE USER IF NOT EXISTS '{REPL_USER}'@'localhost';\n"

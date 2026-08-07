@@ -1,10 +1,25 @@
-from setuptools import setup, find_packages
+from pathlib import Path
+
+from setuptools import find_packages, setup
+
+readme = Path(__file__).parent / "README.md"
+long_description = readme.read_text(encoding="utf-8") if readme.exists() else ""
 
 setup(
     name='myharem',
-    version='0.1.0',
-    packages=find_packages(),
+    version='0.2.0',
+    description=(
+        'Deploy and manage multiple MariaDB instances (single, async '
+        'replication, Galera) from tarballs on a single host.'
+    ),
+    long_description=long_description,
+    long_description_content_type='text/markdown',
+    author='Claudio Nanni',
+    url='https://github.com/claudionanni/myharem',
+    license='MIT',
+    packages=find_packages(exclude=['tests', 'tests.*']),
     include_package_data=True,
+    python_requires='>=3.10',
     install_requires=[
         'click',
     ],
@@ -13,4 +28,13 @@ setup(
             'mh = mh.cli:main',
         ],
     },
+    classifiers=[
+        'Development Status :: 4 - Beta',
+        'Environment :: Console',
+        'Intended Audience :: System Administrators',
+        'License :: OSI Approved :: MIT License',
+        'Operating System :: POSIX :: Linux',
+        'Programming Language :: Python :: 3',
+        'Topic :: Database',
+    ],
 )

@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from mh import deployment, galera, manifest, model, replication
+from mh import config, deployment, galera, manifest, model, replication
 from mh.cli import main
 
 
@@ -139,3 +139,20 @@ def test_cli_help_lists_commands():
     assert result.exit_code == 0
     for cmd in ("deploygalera", "deployreplication", "cluster", "erase"):
         assert cmd in result.output
+
+
+# ---- configurable credentials ----
+
+def test_credential_env_overrides(monkeypatch):
+    monkeypatch.setenv("MYHAREM_ADMIN_PASSWORD", "sekret")
+    monkeypatch.setenv("MYHAREM_SST_PASSWORD", "ssts3cret")
+    assert config.get_admin_password() == "sekret"
+    assert config.get_sst_password() == "ssts3cret"
+
+
+def test_credential_defaults(monkeypatch):
+    monkeypatch.delenv("MYHAREM_ADMIN_PASSWORD", raising=False)
+    monkeypatch.delenv("MYHAREM_SST_PASSWORD", raising=False)
+    monkeypatch.setenv("MYHAREM_CONF", "/nonexistent/myharem.conf")
+    assert config.get_admin_password() == ""
+    assert config.get_sst_password() == "sstpwd"

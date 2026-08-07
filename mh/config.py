@@ -57,6 +57,20 @@ def get_sst_password():
     return config.get('DEFAULT', 'sst_password', fallback='sstpwd')
 
 
+def get_admin_password():
+    """Password for the 'myharem' admin user.
+
+    Resolution: MYHAREM_ADMIN_PASSWORD env, `admin_password` in the config file,
+    then empty (passwordless local-socket auth — backward compatible). Set it to
+    require a password for the admin user that all `mh` commands connect as.
+    """
+    env_value = os.environ.get('MYHAREM_ADMIN_PASSWORD')
+    if env_value:
+        return env_value
+    config = get_config()
+    return config.get('DEFAULT', 'admin_password', fallback='')
+
+
 def setup_myharem_dirs():
     """Sets up the necessary directories for MyHarem."""
     basedir = get_basedir()

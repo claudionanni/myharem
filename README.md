@@ -1,6 +1,16 @@
 # MyHarem
 
-MyHarem is a Python-based CLI tool for managing local MariaDB instances deployed from tarballs. It supports single instances, GTID-based async replication (master/slave), and multi-node Galera clusters.
+MyHarem is a Python CLI for deploying and managing multiple **MariaDB instances
+from tarballs on a single host**. Each instance is fully isolated (its own home,
+data directory, `my.cnf`, port, and socket under a dedicated folder), so many
+instances — including an entire Galera cluster or a replication set — coexist on
+one machine without conflicting.
+
+It supports single instances, GTID-based async replication (one master + N
+slaves), and N-node Galera clusters. As of v0.2.0 it is also **scriptable**: a
+`--json` mode and a persisted manifest let automation drive it as a deployment
+backend (e.g. the Simulacro/MSRS control plane), while it remains a first-class
+standalone tool.
 
 ## Installation
 
@@ -8,193 +18,133 @@ MyHarem is a Python-based CLI tool for managing local MariaDB instances deployed
 sudo pip install .
 ```
 
-This installs the `mh` command-line tool. All `mh` commands that manage instances require `sudo` (root access for socket auth and file ownership).
-
-> **Note:** When updating from a local checkout, pip may not detect changes if the version number hasn't changed. Use `--force-reinstall`:
-> ```bash
-> sudo pip install --force-reinstall --no-deps .
-> ```
-
-Or use the built-in update command:
-
-```bash
-sudo mh update
-```
+Installs the `mh` command. Instance-managing commands require `sudo` (root, for
+socket auth and file ownership). Requires Python 3.10+.
 
 ## Configuration
 
-MyHarem uses a configuration file to specify the base directory and database user. The config path is resolved in this order:
-
-1. `MYHAREM_CONF` environment variable
-2. `/etc/myharem.conf`
-
-Example `myharem.conf`:
+Config is resolved from `MYHAREM_CONF`, then `/etc/myharem.conf`:
 
 ```ini
 basedir=/var/opt/myharem
 dbuser=mysql
+# optional credentials (see Service Users)
+admin_password=
+sst_password=sstpwd
 ```
 
-The first time you run `mh`, it creates the directory structure under `basedir`:
+The first run creates the directory tree under `basedir`:
 
 ```
 basedir/
-├── instances/    # Deployed MariaDB instances
-├── local/        # Place tarballs here for auto-discovery
-├── remote/       # Remote tarball list cache
-└── erased/       # Erased instances (safety net)
+├── instances/       # Deployed MariaDB instances
+├── local/           # Place tarballs here for auto-discovery
+├── erased/          # Erased instances (safety net)
+└── manifest.json    # Registry of deployments (topology/nodes/ports/roles)
 ```
+
+## Output convention (automation-friendly)
+
+**stdout is the result; stderr is progress.** Human progress, warnings, and
+status go to stderr; the command's result goes to stdout. With `--json`, the
+result on stdout is a single machine-readable JSON object:
+
+```bash
+sudo mh --json deploygalera mariadb-11.8.6-linux-x86_64.tar.gz 12000 --nodes 3
+# stdout: {"topology": "galera", "cluster_id": "12000", "nodes": [...], ...}
+```
+
+Deployments are also recorded in `manifest.json`, so state is authoritative
+rather than scraped. `mh --json list` returns instances plus the manifest.
 
 ## Service Users
 
-MyHarem automatically creates three service users on first instance start:
+Created automatically on first instance start (by connecting as `root` via
+socket; Galera joiners receive them via SST from the donor):
 
 | User | Purpose | Auth |
 |------|---------|------|
-| `myharem` | Admin — used by all `mh` commands | No password (socket) |
-| `mh_repl` | Async replication slave IO thread | No password |
-| `mh_sst` | Galera SST with mariabackup | Password: `sstpwd` |
+| `myharem` | Admin — used by all `mh` commands | Socket; password optional via `MYHAREM_ADMIN_PASSWORD` |
+| `mh_repl` | Async replication slave | No password |
+| `mh_sst` | Galera SST (mariabackup) | `MYHAREM_SST_PASSWORD` (default `sstpwd`) |
 
-Users are created by connecting as `root` via socket (requires `sudo`). On Galera joiner nodes, users are received automatically via SST from the donor.
+Set `MYHAREM_ADMIN_PASSWORD` / `MYHAREM_SST_PASSWORD` (or `admin_password` /
+`sst_password` in the config) to avoid the defaults. The admin password is
+passed to clients via `MYSQL_PWD`, never on the command line.
 
-## Tarball Auto-Discovery
+## Tarball auto-discovery
 
-All deploy commands accept a tarball path or just a filename. If the file isn't found at the given path, MyHarem searches in `basedir/local/` automatically.
+Deploy commands accept a full path or a bare filename; if not found as given,
+MyHarem looks in `basedir/local/`:
 
 ```bash
-# These are equivalent:
-sudo mh deploy /var/opt/myharem/local/mariadb-11.8.6-linux-systemd-x86_64.tar.gz 18000
-sudo mh deploy mariadb-11.8.6-linux-systemd-x86_64.tar.gz 18000
+sudo mh deploy mariadb-11.8.6-linux-x86_64.tar.gz 18000   # found in local/
 ```
 
 ## Commands
 
-### `mh deploy` — Interactive Wizard
+### Deploy
 
-When called without arguments, launches an interactive deployment wizard:
-
-1. Pick a tarball from `local/`
-2. Choose deployment type: single, replica, or galera
-3. Enter an instance ID (base port)
-4. Validates that the ID (and dependent IDs) don't already exist
-5. Confirms and deploys
-
-```bash
-sudo mh deploy
-```
-
-### `mh deploy <tarball> <instance_id>`
-
-Deploys a single MariaDB instance directly (non-interactive).
+- `mh deploy` — interactive wizard (pick tarball, type, IDs).
+- `mh deploy <tarball> <id>` — single instance (non-interactive).
+- `mh deploygalera <tarball> <first_id> [--nodes N]` — N-node Galera cluster
+  (default 3). Nodes are placed at `first_id`, `first_id+10000`, … Start the
+  whole cluster with `mh cluster start <first_id>`.
+- `mh deployreplication <tarball> <master_id> [--slaves N]` — master + N GTID
+  slaves (default 1). Slaves at `master_id + i*10000`.
 
 ```bash
-sudo mh deploy mariadb-11.8.6-linux-systemd-x86_64.tar.gz 18000
+sudo mh deploygalera mariadb-11.8.6-linux-x86_64.tar.gz 12000 --nodes 5
+sudo mh deployreplication mariadb-11.8.6-linux-x86_64.tar.gz 18000 --slaves 2
 ```
 
-### `mh deployreplication <tarball> <instance_id>`
+### Cluster lifecycle (whole deployment)
 
-Deploys a master/slave async replication pair using GTID.
-
-The slave ID is master ID + 10000. Both instances are started automatically and replication is configured via `CHANGE MASTER TO ... MASTER_USE_GTID=slave_pos`.
+Operates on every node of a deployment, in the right order, using the manifest:
 
 ```bash
-sudo mh deployreplication mariadb-11.8.6-linux-systemd-x86_64.tar.gz 18000
-# Deploys master: 18000, slave: 28000
+sudo mh cluster start 12000     # Galera: bootstraps node 0, then joins the rest
+sudo mh cluster stop 12000
+sudo mh cluster erase 12000 --yes [--purge]
 ```
 
-### `mh deploygalera <tarball> <first_instance_id>`
+### Per-instance service
 
-Deploys a 3-node Galera cluster. Node IDs are incremented by 10000.
+- `mh service start [--bootstrap] <id>` — start one instance (`--bootstrap` =
+  first node of a **new** Galera cluster only). Fails (non-zero) if the instance
+  doesn't come up in time.
+- `mh service stop <id>` — stop one instance.
+- `mh service status` — status of all instances (`--json` supported).
+
+### Inspect
+
+- `mh list` — instances grouped by version (`--json` adds the manifest).
+- `mh var <name>` — a server variable across running instances (`--json`
+  supported; e.g. `mh --json var wsrep_cluster_size`).
+- `mh log <id> [--lines N] [--level LEVEL]` — tail an instance's error log.
+- `mh cd <id> [--shell]` — print (or `--shell` into) an instance's directory.
+- `mh scli <id>` / `mh cli <id>` — open a client via socket / TCP.
+- `mh show local` — list tarballs in `local/`.
+
+### Remove
+
+- `mh erase <id> [--yes] [--purge]` — stop and remove a single instance. Without
+  `--purge` it is moved to `erased/`; `--yes` skips the confirmation.
+
+### Maintenance
+
+- `mh update` — reinstall MyHarem from the GitHub repository.
+
+## Development
 
 ```bash
-sudo mh deploygalera mariadb-11.8.6-linux-systemd-x86_64.tar.gz 12022
-# Deploys nodes: 12022, 22022, 32022
+python -m pytest tests/
 ```
 
-After deploying, start the cluster in order:
+Tests are MariaDB-free: the tar-extract, DB-init, process-start, and SQL steps
+are stubbed, so they validate port math, the result model, manifest recording,
+deploy orchestration, and rollback without a live server.
 
-```bash
-sudo mh service start --bootstrap 12022   # Bootstrap (new cluster)
-sudo mh service start 22022               # Joins cluster
-sudo mh service start 32022               # Joins cluster
-```
+## License
 
-> **Important:** Only use `--bootstrap` when creating a **new** cluster. On restart, use plain `mh service start` for all nodes.
-
-### `mh service start [--bootstrap] <instance_id>`
-
-Starts a MariaDB instance. Use `--bootstrap` for the first node of a new Galera cluster.
-
-Service users are created automatically on first start. Galera joiners skip user creation (users arrive via SST).
-
-### `mh service stop <instance_id>`
-
-Stops a MariaDB instance.
-
-### `mh service status`
-
-Shows the status of all deployed instances (Running/Stopped).
-
-### `mh list`
-
-Lists all deployed instances grouped by tarball version, sorted by ID.
-
-### `mh scli <instance_id>`
-
-Opens a MariaDB client connected via socket (using the `myharem` admin user).
-
-### `mh cli <instance_id>`
-
-Opens a MariaDB client connected via TCP (using the `myharem` admin user).
-
-### `mh cd <instance_id>`
-
-Prints the instance home directory path.
-
-```bash
-cd "$(mh cd 18000)"
-```
-
-Optional:
-
-```bash
-mh cd --shell 18000
-```
-
-### `mh log <instance_id>`
-
-Shows the latest log entries for an instance.
-
-Options:
-*   `--lines <n>`: Number of lines to show (default: 20).
-*   `--level <level>`: Filter by log level (e.g., `ERROR`, `Warning`).
-
-### `mh var <variable_name>`
-
-Extracts a server variable from all running instances.
-
-```bash
-sudo mh var version
-# [18000] 11.8.6-MariaDB
-# [28000] 11.8.6-MariaDB
-```
-
-### `mh erase <instance_id>`
-
-Removes an instance completely. Requires double confirmation. Stops the instance if running and moves it to `erased/`.
-
-### `mh show local`
-
-Lists tarballs available in the `local/` directory.
-
-### `mh show remote`
-
-Lists remotely available tarballs from a previously fetched list.
-
-### `mh update`
-
-Updates MyHarem to the latest version from the GitHub repository.
-
-```bash
-sudo mh update
-```
+MIT — see [LICENSE](LICENSE).

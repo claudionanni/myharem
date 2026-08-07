@@ -6,7 +6,7 @@ import click
 
 from . import config
 from . import report
-from .deployment import ADMIN_USER
+from .deployment import ADMIN_USER, ADMIN_PASSWORD
 
 
 class Instance:
@@ -254,6 +254,17 @@ class Instance:
     def mysqld_safe_bin(self):
         return self.path / 'bin' / 'mysqld_safe'
 
+    def _admin_env(self):
+        """Environment for client connections as the admin user.
+
+        Passes the admin password via MYSQL_PWD so it never appears on the
+        command line (process list). Empty password → unchanged environment.
+        """
+        env = os.environ.copy()
+        if ADMIN_PASSWORD:
+            env['MYSQL_PWD'] = ADMIN_PASSWORD
+        return env
+
     def start(self, wsrep_new_cluster=False):
         """Starts the MariaDB instance.
 
@@ -298,7 +309,8 @@ class Instance:
             "shutdown",
         ]
 
-        process = subprocess.run(cmd, capture_output=True, text=True)
+        process = subprocess.run(cmd, capture_output=True, text=True,
+                                 env=self._admin_env())
 
         if process.returncode != 0:
             if "Can't connect" in process.stderr:
@@ -319,6 +331,8 @@ class Instance:
                 f"mariadb client not found at {self.mariadb_bin}"
             )
 
+        if ADMIN_PASSWORD:
+            os.environ['MYSQL_PWD'] = ADMIN_PASSWORD
         os.execv(
             str(self.mariadb_bin),
             [str(self.mariadb_bin), f"-u{ADMIN_USER}",
@@ -334,6 +348,8 @@ class Instance:
                 f"mariadb client not found at {self.mariadb_bin}"
             )
 
+        if ADMIN_PASSWORD:
+            os.environ['MYSQL_PWD'] = ADMIN_PASSWORD
         os.execv(
             str(self.mariadb_bin),
             [str(self.mariadb_bin), f"-u{ADMIN_USER}", "--host=127.0.0.1",
@@ -353,7 +369,8 @@ class Instance:
         ]
 
         process = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=5
+            cmd, capture_output=True, text=True, timeout=5,
+            env=self._admin_env(),
         )
         return "Running" if process.returncode == 0 else "Stopped"
 
@@ -394,7 +411,8 @@ class Instance:
         ]
 
         process = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=timeout
+            cmd, capture_output=True, text=True, timeout=timeout,
+            env=self._admin_env(),
         )
 
         if process.returncode != 0:

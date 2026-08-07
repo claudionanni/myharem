@@ -1,0 +1,50 @@
+# Changelog
+
+All notable changes to MyHarem are documented here.
+
+## [0.2.0] - 2026-08-07
+
+Professionalization pass — MyHarem becomes scriptable and safe to drive from
+automation (and usable as a deployment backend, e.g. for Simulacro/MSRS), while
+remaining a first-class standalone CLI.
+
+### Added
+- Global `--json` flag: `deploy*`, `list`, `service status`, `var`, and
+  `cluster` emit machine-readable JSON on **stdout**; progress/diagnostics go to
+  **stderr** — so tools can parse results reliably.
+- Persisted **manifest** (`<basedir>/manifest.json`) recording each
+  deployment's topology, nodes, ports, and roles — an authoritative state source
+  instead of scraping directory names and `my.cnf`.
+- **Cluster-level lifecycle**: `mh cluster start|stop|erase <cluster_id>`
+  operates on a whole deployment in the correct order (Galera bootstrap node
+  first), driven by the manifest.
+- **N-node Galera** (`mh deploygalera --nodes N`) and **1-master-N-slaves**
+  async replication (`mh deployreplication --slaves N`).
+- Non-interactive teardown: `mh erase --yes`/`--purge`, `mh cluster erase
+  --yes`/`--purge`.
+- Configurable credentials via env/config: `MYHAREM_SST_PASSWORD` and
+  `MYHAREM_ADMIN_PASSWORD` (the admin `myharem` user can now have a password,
+  passed to clients via `MYSQL_PWD`, never the command line).
+- MIT `LICENSE`; a pytest suite covering port math, the result model, manifest
+  round-trip, deploy orchestration, and rollback.
+
+### Changed
+- Deploy commands return structured results and record them in the manifest.
+- Unique per-cluster `wsrep_cluster_name` (`mh_cluster_<id>`) so multiple Galera
+  clusters can coexist on one host without colliding.
+- Output convention: **stdout = result, stderr = progress**.
+- `setup.py`: `python_requires>=3.10` and full package metadata.
+
+### Fixed
+- `mh service start` now **fails (non-zero) on start/SST timeout** instead of
+  silently succeeding.
+- Partial multi-node deploys **roll back** already-created instances on failure
+  instead of leaving orphans.
+- Removed the broken `mh show remote` command (it referenced a non-existent
+  fetch command).
+
+## [0.1.0]
+
+- Initial Python refactor: deploy single / async pair / 3-node Galera from
+  tarballs, per-instance isolation (dir/datadir/`my.cnf`/port/socket), service
+  users, and basic per-instance lifecycle.
