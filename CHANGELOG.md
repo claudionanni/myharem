@@ -2,6 +2,17 @@
 
 All notable changes to MyHarem are documented here.
 
+## [0.3.2] - 2026-08-11
+
+### Added
+- `mh fetch-tarball URL [--name FILENAME]`: downloads a tarball into
+  `<basedir>/local/` if not already staged there (idempotent — a pre-existing
+  file with the same name is left untouched, no re-fetch). `--name` overrides
+  the saved filename for URLs that don't end in the real filename (e.g. a
+  presigned S3 URL with a query string). Lets a caller (like MSRS) resolve a
+  community tarball's real download URL and stage it on demand instead of
+  requiring it pre-staged by hand.
+
 ## [0.3.1] - 2026-08-11
 
 Correctness fix: `mh cluster start` / `mh service start` could report a

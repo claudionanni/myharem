@@ -1,6 +1,7 @@
 import shutil
 import subprocess
 import time
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -31,6 +32,49 @@ def resolve_tarball(tarball_path):
         f"Tarball not found: {tarball_path}\n"
         f"Also checked: {local_path}"
     )
+
+
+def _download(url, dest, timeout=300):
+    """Streams `url` to `dest`. Separated from fetch_tarball so tests can
+    monkeypatch the network call without touching filesystem/idempotency logic."""
+    with urllib.request.urlopen(url, timeout=timeout) as response, \
+            open(dest, 'wb') as out:
+        shutil.copyfileobj(response, out)
+
+
+def fetch_tarball(url, filename=None):
+    """Downloads a tarball into <basedir>/local/ if not already staged there.
+
+    Idempotent: a pre-existing file with the same name is left untouched and
+    the download is skipped entirely (no re-fetch, no partial-overwrite risk).
+    `filename` overrides the name to save as — needed when `url` doesn't end
+    in the real filename (e.g. a presigned URL with a query string).
+
+    Returns the local Path.
+    """
+    name = filename or Path(url.split('?', 1)[0]).name
+    if not name:
+        raise click.ClickException(f"Could not determine a filename from URL: {url}")
+
+    local_dir = config.get_basedir() / 'local'
+    local_dir.mkdir(parents=True, exist_ok=True)
+    dest = local_dir / name
+
+    if dest.exists():
+        report.log(f"Tarball already staged: {dest}")
+        return dest
+
+    report.log(f"Fetching tarball from {url} ...")
+    tmp_dest = dest.with_suffix(dest.suffix + '.part')
+    try:
+        _download(url, tmp_dest)
+        tmp_dest.rename(dest)
+    except Exception as exc:
+        tmp_dest.unlink(missing_ok=True)
+        raise click.ClickException(f"Failed to fetch tarball from {url}: {exc}")
+
+    report.success(f"Tarball staged at {dest}")
+    return dest
 
 
 def deploy_instance(tarball_path, instance_id, init_db=True):

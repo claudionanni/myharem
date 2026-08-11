@@ -116,6 +116,64 @@ def test_deploy_galera_rolls_back_on_failure(stub_deploy, basedir, monkeypatch):
     assert manifest.get("20000") is None
 
 
+# ---- fetch_tarball (idempotent download into <basedir>/local/) ----
+
+def test_fetch_tarball_downloads_when_missing(basedir, monkeypatch):
+    calls = []
+
+    def fake_download(url, dest, timeout=300):
+        calls.append(url)
+        Path(dest).write_text('fake-tarball-bytes')
+
+    monkeypatch.setattr(deployment, '_download', fake_download)
+    dest = deployment.fetch_tarball('https://example.org/mariadb-11.4.8.tar.gz')
+
+    assert dest == basedir / 'local' / 'mariadb-11.4.8.tar.gz'
+    assert dest.read_text() == 'fake-tarball-bytes'
+    assert calls == ['https://example.org/mariadb-11.4.8.tar.gz']
+
+
+def test_fetch_tarball_skips_download_when_already_staged(basedir, monkeypatch):
+    local_dir = basedir / 'local'
+    local_dir.mkdir(parents=True)
+    existing = local_dir / 'mariadb-11.4.8.tar.gz'
+    existing.write_text('already-here')
+
+    def fail_download(url, dest, timeout=300):
+        raise AssertionError('should not download when already staged')
+
+    monkeypatch.setattr(deployment, '_download', fail_download)
+    dest = deployment.fetch_tarball('https://example.org/mariadb-11.4.8.tar.gz')
+
+    assert dest == existing
+    assert dest.read_text() == 'already-here'
+
+
+def test_fetch_tarball_honors_name_override_for_presigned_urls(basedir, monkeypatch):
+    monkeypatch.setattr(
+        deployment, '_download',
+        lambda url, dest, timeout=300: Path(dest).write_text('x'),
+    )
+    dest = deployment.fetch_tarball(
+        'https://s3.example.com/bucket/key?X-Amz-Signature=abc123',
+        filename='mariadb-11.4.8-linux-systemd-x86_64.tar.gz',
+    )
+    assert dest.name == 'mariadb-11.4.8-linux-systemd-x86_64.tar.gz'
+
+
+def test_fetch_tarball_cleans_up_partial_file_on_failure(basedir, monkeypatch):
+    def failing_download(url, dest, timeout=300):
+        Path(dest).write_text('partial')
+        raise OSError('connection reset')
+
+    monkeypatch.setattr(deployment, '_download', failing_download)
+    with pytest.raises(click.ClickException, match='Failed to fetch tarball'):
+        deployment.fetch_tarball('https://example.org/mariadb-11.4.8.tar.gz')
+
+    assert not (basedir / 'local' / 'mariadb-11.4.8.tar.gz').exists()
+    assert not (basedir / 'local' / 'mariadb-11.4.8.tar.gz.part').exists()
+
+
 # ---- service orchestration (joiner sync must be WSREP-aware, not socket-only) ----
 
 class _FakeJoinerInstance:

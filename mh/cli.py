@@ -59,6 +59,19 @@ def deploy(ctx, tarball, instance_id):
     _deploy_wizard(ctx)
 
 
+@main.command('fetch-tarball')
+@click.argument('url')
+@click.option('--name', 'filename', default=None,
+              help="Filename to save as under <basedir>/local/ "
+                   "(defaults to the URL's own basename — required when the "
+                   "URL doesn't end in the real filename, e.g. a presigned URL).")
+@click.pass_context
+def fetch_tarball_command(ctx, url, filename):
+    """Downloads a tarball into <basedir>/local/ (skipped if already staged)."""
+    dest = deployment.fetch_tarball(url, filename=filename)
+    _emit_action(ctx, {'path': str(dest)}, f"Tarball staged at {dest}")
+
+
 def _deploy_wizard(ctx):
     """Interactive deployment wizard: pick tarball, type, and instance ID."""
     from . import replication
