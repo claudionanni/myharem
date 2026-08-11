@@ -13,7 +13,7 @@ import click
 import pytest
 from click.testing import CliRunner
 
-from mh import config, deployment, galera, manifest, model, replication
+from mh import config, deployment, galera, manifest, model, replication, service
 from mh.cli import main
 
 
@@ -114,6 +114,57 @@ def test_deploy_galera_rolls_back_on_failure(stub_deploy, basedir, monkeypatch):
     # first node dir should have been rolled back (purged)
     assert not (basedir / "instances" / "fake-11.8.6.20000").exists()
     assert manifest.get("20000") is None
+
+
+# ---- service orchestration (joiner sync must be WSREP-aware, not socket-only) ----
+
+class _FakeJoinerInstance:
+    """A Galera joiner whose socket is ready immediately but whose WSREP sync
+    completes only after `synced_after` polls — reproducing the real timing
+    (socket connectable before SST/WSREP sync actually finishes)."""
+
+    def __init__(self, synced_after):
+        self.id = "30000"
+        self._polls = 0
+        self._synced_after = synced_after
+        self.started_with = None
+
+    def _require_exists(self):
+        pass
+
+    def start(self, wsrep_new_cluster=False):
+        self.started_with = wsrep_new_cluster
+
+    def is_socket_ready(self):
+        return True
+
+    def wsrep_local_state_comment(self):
+        self._polls += 1
+        return "Synced" if self._polls >= self._synced_after else "Joined"
+
+
+def test_start_instance_waits_for_wsrep_sync_before_declaring_joiner_ok(monkeypatch):
+    fake = _FakeJoinerInstance(synced_after=3)
+    monkeypatch.setattr(service, "Instance", lambda instance_id: fake)
+    monkeypatch.setattr(service, "_is_galera_instance", lambda instance: True)
+    monkeypatch.setattr(service.time, "sleep", lambda seconds: None)
+
+    service.start_instance("30000", bootstrap=False)
+
+    # Declared success only once wsrep_local_state_comment() actually said
+    # "Synced" — not on the first is_socket_ready() poll.
+    assert fake._polls == 3
+    assert fake.started_with is False
+
+
+def test_start_instance_joiner_times_out_if_never_synced(monkeypatch):
+    fake = _FakeJoinerInstance(synced_after=10_000)  # never reaches "Synced"
+    monkeypatch.setattr(service, "Instance", lambda instance_id: fake)
+    monkeypatch.setattr(service, "_is_galera_instance", lambda instance: True)
+    monkeypatch.setattr(service.time, "sleep", lambda seconds: None)
+
+    with pytest.raises(click.ClickException, match="did not sync within 5 min"):
+        service.start_instance("30000", bootstrap=False)
 
 
 # ---- galera provider resolution (the linux-x86_64 "no bundled Galera" bug) ----

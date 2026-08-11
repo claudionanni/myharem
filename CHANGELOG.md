@@ -2,6 +2,26 @@
 
 All notable changes to MyHarem are documented here.
 
+## [0.3.1] - 2026-08-11
+
+Correctness fix: `mh cluster start` / `mh service start` could report a
+Galera joiner as successfully synced before it actually was, because the
+socket file becoming connectable (`is_socket_ready()`) was used as the sole
+readiness signal, backed only by a blind 2s grace sleep. Under real SST
+timing this let orchestration advance to the next node before the joiner had
+genuinely reached WSREP sync, causing the actual SST/cluster formation to
+fail downstream (observed repeatedly on AWS/Rocky 9).
+
+### Fixed
+- `Instance.wsrep_local_state_comment()` (new): queries
+  `wsrep_local_state_comment` via root over the unix socket (not the
+  `myharem` admin user, which may not exist yet — a joiner receives it via
+  SST from the donor).
+- `start_instance()`'s joiner-wait loop now requires `is_socket_ready()`
+  **and** `wsrep_local_state_comment() == "Synced"` before declaring a
+  joiner ready, replacing the blind 2s grace sleep. Same 5-minute timeout
+  budget; raises the same clear error on timeout.
+
 ## [0.3.0] - 2026-08-07
 
 Multi-host: myharem can now advertise a real IP and form clusters spanning

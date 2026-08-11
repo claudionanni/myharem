@@ -402,6 +402,43 @@ class Instance:
         """
         return any(candidate.exists() for candidate in self._socket_candidates())
 
+    def wsrep_local_state_comment(self):
+        """Returns the Galera wsrep_local_state_comment status value (e.g.
+        'Synced', 'Joiner', 'Donor/Desynced'), or None if not reachable yet
+        or not a Galera instance.
+
+        Connects as root over the unix socket rather than run_sql()'s
+        ADMIN_USER — a Galera joiner receives the myharem admin user via SST
+        from the donor, which can still be in flight at the moment this is
+        checked (right after the socket becomes connectable). Root over the
+        socket is the only identity guaranteed to exist immediately after
+        mariadb-install-db.
+        """
+        if not self.path:
+            return None
+        mariadb = self.path / 'bin' / 'mariadb'
+        if not mariadb.exists():
+            mariadb = self.path / 'bin' / 'mysql'
+        if not mariadb.exists():
+            return None
+
+        cmd = [
+            str(mariadb), '-uroot',
+            f'--socket={self.socket_path}',
+            '-B', '-N',
+            '-e', "SHOW STATUS LIKE 'wsrep_local_state_comment'",
+        ]
+        try:
+            process = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+        except Exception:
+            return None
+        if process.returncode != 0:
+            return None
+        parts = process.stdout.strip().split('\t')
+        if len(parts) != 2:
+            return None
+        return parts[1].strip()
+
     def run_sql(self, sql, timeout=10):
         """Executes a SQL statement and returns the output.
 

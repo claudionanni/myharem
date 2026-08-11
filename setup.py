@@ -7,7 +7,7 @@ long_description = readme.read_text(encoding="utf-8") if readme.exists() else ""
 
 setup(
     name='myharem',
-    version='0.3.0',
+    version='0.3.1',
     description=(
         'Deploy and manage multiple MariaDB instances (single, async '
         'replication, Galera) from tarballs on a single host.'

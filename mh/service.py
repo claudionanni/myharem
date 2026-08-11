@@ -27,13 +27,16 @@ def start_instance(instance_id, bootstrap=False):
     is_galera_joiner = is_galera and not bootstrap
 
     if is_galera_joiner:
-        # Galera joiners receive users via SST from the donor node.
+        # Galera joiners receive users via SST from the donor node. The
+        # socket becomes connectable before SST/WSREP sync actually
+        # completes, so advancing on that alone is a false-success race —
+        # wait for wsrep_local_state_comment == "Synced" too.
         report.log("Galera joiner — waiting for SST and sync...", nl=False)
         for _ in range(300):  # Up to 5 min for SST
             time.sleep(1)
             report.log(".", nl=False)
-            if instance.is_socket_ready():
-                time.sleep(2)
+            if (instance.is_socket_ready()
+                    and instance.wsrep_local_state_comment() == "Synced"):
                 report.log(" OK", fg='green')
                 report.log("Users received via SST from donor node.")
                 return
