@@ -2,6 +2,16 @@
 
 All notable changes to MyHarem are documented here.
 
+## [0.3.3] - 2026-08-11
+
+### Fixed
+- Replication slaves (`deploy_replication`, `deploy_slave`) set `relay_log` to
+  a bare relative basename with no `relay_log_index`, which failed at
+  `START SLAVE` time — relay log files are only created lazily then, not at
+  server startup, so the bad path went unnoticed until that point —
+  with `ERROR 29 ... File './relay-bin.index' not found`. Both are now
+  absolute paths anchored in the slave's own datadir.
+
 ## [0.3.2] - 2026-08-11
 
 ### Added

@@ -20,6 +20,21 @@ def _now():
     return datetime.now(timezone.utc).isoformat()
 
 
+def _relay_log_config(instance_path, slave_id):
+    """Relay-log settings anchored to absolute paths in the instance's own
+    datadir. A bare relative basename (e.g. `relay-bin.20000`) leaves
+    `relay_log_index`'s location to server defaults, which don't reliably
+    resolve relative to the instance's datadir across builds/versions —
+    observed failing with `ERROR 29 ... File './relay-bin.index' not found`
+    at START SLAVE time (the relay log files are only created lazily then,
+    not at server startup, so the bad path goes unnoticed until that point)."""
+    relay_base = Path(instance_path) / "data" / f"relay-bin.{slave_id}"
+    return {
+        "relay_log": str(relay_base),
+        "relay_log_index": f"{relay_base}.index",
+    }
+
+
 def compute_slave_ids(master_instance_id, slaves):
     """Returns the list of slave ids for a master + N slaves (pure)."""
     master = int(master_instance_id)
@@ -70,7 +85,7 @@ def deploy_replication(tarball_path, master_instance_id, slaves=1):
             deployment._generate_my_cnf(str(slave_id), slave_path, extra_config={
                 "log_slave_updates": True,
                 "read_only": "ON",
-                "relay_log": f"relay-bin.{slave_id}",
+                **_relay_log_config(slave_path, slave_id),
             })
             deployment.initialize_database(slave_path)
             slave_paths[slave_id] = slave_path
@@ -172,7 +187,7 @@ def deploy_slave(tarball_path, slave_instance_id, master_host, master_port,
         deployment._generate_my_cnf(str(slave_id), slave_path, extra_config={
             "log_slave_updates": True,
             "read_only": "ON",
-            "relay_log": f"relay-bin.{slave_id}",
+            **_relay_log_config(slave_path, slave_id),
         })
         deployment.initialize_database(slave_path)
         slave = Instance(str(slave_id))

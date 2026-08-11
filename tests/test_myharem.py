@@ -358,6 +358,15 @@ def test_deploy_replication_records_result(stub_deploy, monkeypatch):
     assert roles == [("3000", "master"), ("13000", "slave"), ("23000", "slave")]
     assert manifest.get("3000")["topology"] == "replication"
 
+    # Regression: a bare relative relay-log basename left relay_log_index's
+    # location to server defaults, which failed at START SLAVE time with
+    # "File './relay-bin.index' not found" -- both must be absolute paths
+    # inside the slave's own datadir.
+    slave_my_cnf = (Path(result.nodes[1].path) / "my.cnf").read_text()
+    slave_datadir = Path(result.nodes[1].path) / "data"
+    assert f"relay_log={slave_datadir / 'relay-bin.13000'}" in slave_my_cnf
+    assert f"relay_log_index={slave_datadir / 'relay-bin.13000.index'}" in slave_my_cnf
+
 
 # ---- instance id uniqueness (the duplicate-.39000 resolution bug) ----
 
