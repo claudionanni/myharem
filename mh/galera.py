@@ -9,9 +9,15 @@ from . import model
 from . import report
 
 
-INST_STEP = 10000
-WSREP_STEP = 1000
-SST_STEP = 2000
+# Per-node port budget: N=SQL, N+WSREP_STEP=wsrep/gmcast, N+WSREP_STEP+1=
+# Galera's automatic IST listener (never set explicitly -- Galera claims it
+# on its own, relative to the wsrep port -- so that slot must stay unused by
+# anything else), N+SST_STEP=SST receive. The remaining N+4..N+9 are spare
+# margin for future needs (e.g. a metrics port).
+INST_STEP = 10
+WSREP_STEP = 1
+SST_STEP = 3
+MAX_PORT = 65535
 
 
 def _now():
@@ -19,16 +25,29 @@ def _now():
 
 
 def compute_node_ids(first_instance_id, nodes):
-    """Returns the list of node ids for an N-node cluster (pure)."""
+    """Returns the list of node ids for an N-node cluster (pure).
+
+    Raises if the highest derived port (SST, the widest offset) would exceed
+    the valid TCP port range -- without this check a too-large topology
+    silently computes an invalid port and only fails much later as a
+    cryptic bind error.
+    """
     first = int(first_instance_id)
-    return [first + i * INST_STEP for i in range(int(nodes))]
+    ids = [first + i * INST_STEP for i in range(int(nodes))]
+    highest = ids[-1] + SST_STEP
+    if highest > MAX_PORT:
+        raise click.ClickException(
+            f"Topology too large: highest derived port {highest} exceeds "
+            f"{MAX_PORT}. Use a lower first instance id or fewer nodes."
+        )
+    return ids
 
 
 def deploy_cluster(tarball_path, first_instance_id, nodes=3, wsrep_provider=None,
                    advertise="127.0.0.1"):
     """Deploys an N-node Galera cluster (default 3) on a single host.
 
-    Nodes are placed at first_id, first_id+10000, first_id+20000, ... and share
+    Nodes are placed at first_id, first_id+10, first_id+20, ... and share
     one gcomm:// address listing every node's wsrep port. Returns a
     DeploymentResult and records it in the manifest. Rolls back partial nodes on
     failure.
@@ -232,6 +251,10 @@ def _generate_galera_my_cnf(instance_path, instance_id, cluster_address,
     """
     instance_path = Path(instance_path)
     wsrep_port = int(instance_id) + WSREP_STEP
+    # wsrep_port + 1 is Galera's automatic IST (incremental state transfer)
+    # listener -- it claims that port on its own, relative to the wsrep
+    # port, without myharem ever setting it explicitly. It must stay free;
+    # that's why SST_STEP leaves a gap rather than following immediately.
     sst_port = int(instance_id) + SST_STEP
 
     galera_lib = _find_galera_lib(instance_path, override=wsrep_provider)

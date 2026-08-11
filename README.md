@@ -91,10 +91,10 @@ sudo mh deploy mariadb-11.8.6-linux-x86_64.tar.gz 18000   # found in local/
 - `mh deploy <tarball> <id>` — single instance (non-interactive).
 - `mh deploygalera <tarball> <first_id> [--nodes N] [--wsrep-provider PATH]` —
   N-node Galera cluster (default 3). Nodes are placed at `first_id`,
-  `first_id+10000`, … Start the whole cluster with `mh cluster start <first_id>`.
+  `first_id+10`, … Start the whole cluster with `mh cluster start <first_id>`.
   See **Galera provider** below for `--wsrep-provider`.
 - `mh deployreplication <tarball> <master_id> [--slaves N]` — master + N GTID
-  slaves (default 1). Slaves at `master_id + i*10000`.
+  slaves (default 1). Slaves at `master_id + i*10`.
 
 ```bash
 sudo mh deploygalera mariadb-11.8.6-linux-systemd-x86_64.tar.gz 12000 --nodes 5

@@ -5,13 +5,18 @@ from pathlib import Path
 import click
 
 from . import deployment
+from . import galera
 from . import manifest
 from . import model
 from . import report
 from .instance import Instance
 
 
-REPL_STEP = 10000
+# Kept numerically identical to galera.INST_STEP for a single mental model
+# across topologies -- a replication slave only needs 1 port today, but the
+# same per-node budget leaves room for a future per-slave port without
+# another migration.
+REPL_STEP = galera.INST_STEP
 WAIT_TIMEOUT = 30
 WAIT_INTERVAL = 1
 
@@ -36,15 +41,24 @@ def _relay_log_config(instance_path, slave_id):
 
 
 def compute_slave_ids(master_instance_id, slaves):
-    """Returns the list of slave ids for a master + N slaves (pure)."""
+    """Returns the list of slave ids for a master + N slaves (pure).
+
+    Raises if the highest derived id would exceed the valid TCP port range.
+    """
     master = int(master_instance_id)
-    return [master + i * REPL_STEP for i in range(1, int(slaves) + 1)]
+    ids = [master + i * REPL_STEP for i in range(1, int(slaves) + 1)]
+    if ids and ids[-1] > galera.MAX_PORT:
+        raise click.ClickException(
+            f"Topology too large: highest derived port {ids[-1]} exceeds "
+            f"{galera.MAX_PORT}. Use a lower master instance id or fewer slaves."
+        )
+    return ids
 
 
 def deploy_replication(tarball_path, master_instance_id, slaves=1):
     """Deploys a master + N async (GTID) slaves on a single host.
 
-    Slaves are placed at master_id + i*10000 (i = 1..N). Deploys and starts all
+    Slaves are placed at master_id + i*10 (i = 1..N). Deploys and starts all
     instances, wires GTID replication on each slave, records a DeploymentResult
     in the manifest, and rolls back on failure.
     """

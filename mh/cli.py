@@ -115,10 +115,10 @@ def _deploy_wizard(ctx):
     if deploy_type == 'single':
         needed_ids = [instance_id]
     elif deploy_type == 'replica':
-        needed_ids = [instance_id] + [instance_id + 10000 * i
+        needed_ids = [instance_id] + [instance_id + replication.REPL_STEP * i
                                       for i in range(1, count + 1)]
     else:  # galera
-        needed_ids = [instance_id + 10000 * i for i in range(count)]
+        needed_ids = [instance_id + galera.INST_STEP * i for i in range(count)]
 
     conflicts = [str(nid) for nid in needed_ids if str(nid) in existing]
     if conflicts:

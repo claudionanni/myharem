@@ -48,13 +48,13 @@ def stub_deploy(basedir, monkeypatch):
 # ---- pure port math ----
 
 def test_compute_node_ids():
-    assert galera.compute_node_ids(20000, 3) == [20000, 30000, 40000]
+    assert galera.compute_node_ids(20000, 3) == [20000, 20010, 20020]
     assert galera.compute_node_ids(5000, 1) == [5000]
 
 
 def test_compute_slave_ids():
-    assert replication.compute_slave_ids(3000, 2) == [13000, 23000]
-    assert replication.compute_slave_ids(3000, 1) == [13000]
+    assert replication.compute_slave_ids(3000, 2) == [3010, 3020]
+    assert replication.compute_slave_ids(3000, 1) == [3010]
 
 
 # ---- result model ----
@@ -89,9 +89,9 @@ def test_manifest_roundtrip(basedir):
 def test_deploy_galera_records_result_and_manifest(stub_deploy):
     result = galera.deploy_cluster("fake-11.8.6.tar.gz", "20000", nodes=3)
     assert result.topology == "galera"
-    assert [n.id for n in result.nodes] == ["20000", "30000", "40000"]
-    assert result.nodes[0].wsrep_port == 21000
-    assert result.nodes[0].sst_port == 22000
+    assert [n.id for n in result.nodes] == ["20000", "20010", "20020"]
+    assert result.nodes[0].wsrep_port == 20001
+    assert result.nodes[0].sst_port == 20003
     assert manifest.get("20000")["topology"] == "galera"
     # every node has a generated my.cnf with a unique cluster name
     my_cnf = Path(result.nodes[0].path) / "my.cnf"
@@ -299,10 +299,10 @@ def test_deploy_galera_single_host_is_loopback(stub_deploy):
     # Regression guard: the default (colocated) output must stay loopback.
     result = galera.deploy_cluster("fake-11.8.6.tar.gz", "20000", nodes=2)
     my_cnf = (Path(result.nodes[0].path) / "my.cnf").read_text()
-    assert "wsrep_node_address=127.0.0.1:21000" in my_cnf
-    assert "gmcast.listen_addr=tcp://127.0.0.1:21000" in my_cnf
-    assert "wsrep_sst_receive_address=127.0.0.1:22000" in my_cnf
-    assert "wsrep_cluster_address=gcomm://127.0.0.1:21000,127.0.0.1:31000" in my_cnf
+    assert "wsrep_node_address=127.0.0.1:20001" in my_cnf
+    assert "gmcast.listen_addr=tcp://127.0.0.1:20001" in my_cnf
+    assert "wsrep_sst_receive_address=127.0.0.1:20003" in my_cnf
+    assert "wsrep_cluster_address=gcomm://127.0.0.1:20001,127.0.0.1:20011" in my_cnf
 
 
 def test_deploy_galera_advertises_real_ip(stub_deploy):
@@ -310,13 +310,16 @@ def test_deploy_galera_advertises_real_ip(stub_deploy):
         "fake-11.8.6.tar.gz", "20000", nodes=2, advertise="10.0.0.5"
     )
     my_cnf = (Path(result.nodes[0].path) / "my.cnf").read_text()
-    assert "wsrep_node_address=10.0.0.5:21000" in my_cnf
-    assert "gmcast.listen_addr=tcp://0.0.0.0:21000" in my_cnf  # listen all ifaces
-    assert "wsrep_sst_receive_address=10.0.0.5:22000" in my_cnf
-    assert "wsrep_cluster_address=gcomm://10.0.0.5:21000,10.0.0.5:31000" in my_cnf
+    assert "wsrep_node_address=10.0.0.5:20001" in my_cnf
+    assert "gmcast.listen_addr=tcp://0.0.0.0:20001" in my_cnf  # listen all ifaces
+    assert "wsrep_sst_receive_address=10.0.0.5:20003" in my_cnf
+    assert "wsrep_cluster_address=gcomm://10.0.0.5:20001,10.0.0.5:20011" in my_cnf
 
 
 def test_deploy_node_distributed(stub_deploy):
+    # Member-list entries are opaque peer addresses supplied by the caller
+    # (representing other hosts in a distributed cluster) -- not derived from
+    # this node's own id, so they're left as arbitrary fixture values.
     members = ["10.0.0.1:21000", "10.0.0.2:21000"]
     result = galera.deploy_node(
         "fake-11.8.6.tar.gz", "20000", members, "10.0.0.2", "mh_env42"
@@ -324,8 +327,8 @@ def test_deploy_node_distributed(stub_deploy):
     assert result.topology == "galera" and result.nodes[0].id == "20000"
     my_cnf = (Path(result.nodes[0].path) / "my.cnf").read_text()
     assert "wsrep_cluster_address=gcomm://10.0.0.1:21000,10.0.0.2:21000" in my_cnf
-    assert "wsrep_node_address=10.0.0.2:21000" in my_cnf
-    assert "gmcast.listen_addr=tcp://0.0.0.0:21000" in my_cnf
+    assert "wsrep_node_address=10.0.0.2:20001" in my_cnf
+    assert "gmcast.listen_addr=tcp://0.0.0.0:20001" in my_cnf
     assert "wsrep_cluster_name=mh_env42" in my_cnf
     assert manifest.get("20000")["topology"] == "galera"
 
@@ -355,7 +358,7 @@ def test_deploy_replication_records_result(stub_deploy, monkeypatch):
     result = replication.deploy_replication("fake-11.8.6.tar.gz", "3000", slaves=2)
     assert result.topology == "replication"
     roles = [(n.id, n.role) for n in result.nodes]
-    assert roles == [("3000", "master"), ("13000", "slave"), ("23000", "slave")]
+    assert roles == [("3000", "master"), ("3010", "slave"), ("3020", "slave")]
     assert manifest.get("3000")["topology"] == "replication"
 
     # Regression: a bare relative relay-log basename left relay_log_index's
@@ -364,8 +367,8 @@ def test_deploy_replication_records_result(stub_deploy, monkeypatch):
     # inside the slave's own datadir.
     slave_my_cnf = (Path(result.nodes[1].path) / "my.cnf").read_text()
     slave_datadir = Path(result.nodes[1].path) / "data"
-    assert f"relay_log={slave_datadir / 'relay-bin.13000'}" in slave_my_cnf
-    assert f"relay_log_index={slave_datadir / 'relay-bin.13000.index'}" in slave_my_cnf
+    assert f"relay_log={slave_datadir / 'relay-bin.3010'}" in slave_my_cnf
+    assert f"relay_log_index={slave_datadir / 'relay-bin.3010.index'}" in slave_my_cnf
 
 
 # ---- instance id uniqueness (the duplicate-.39000 resolution bug) ----
@@ -417,6 +420,33 @@ def test_cli_help_lists_commands():
     assert result.exit_code == 0
     for cmd in ("deploygalera", "deployreplication", "cluster", "erase"):
         assert cmd in result.output
+
+
+def test_cli_wizard_uses_real_step_constants_not_hardcoded():
+    """Regression guard: the interactive wizard once hardcoded the literal
+    10000 for galera/replication id spacing instead of importing
+    galera.INST_STEP/replication.REPL_STEP, silently desyncing the moment
+    those constants changed. Assert it references the real constants."""
+    import inspect
+    from mh import cli as cli_module
+
+    source = inspect.getsource(cli_module._deploy_wizard)
+    assert "galera.INST_STEP" in source
+    assert "replication.REPL_STEP" in source
+    assert "10000" not in source
+
+
+# ---- port ceiling ----
+
+def test_compute_node_ids_rejects_topology_exceeding_port_ceiling():
+    huge_nodes = (galera.MAX_PORT - galera.SST_STEP) // galera.INST_STEP + 2
+    with pytest.raises(click.ClickException, match="exceeds"):
+        galera.compute_node_ids(1, huge_nodes)
+
+
+def test_compute_slave_ids_rejects_topology_exceeding_port_ceiling():
+    with pytest.raises(click.ClickException, match="exceeds"):
+        replication.compute_slave_ids(galera.MAX_PORT - 5, 3)
 
 
 # ---- configurable credentials ----

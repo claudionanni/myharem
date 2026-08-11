@@ -2,6 +2,30 @@
 
 All notable changes to MyHarem are documented here.
 
+## [0.4.0] - 2026-08-11
+
+### Changed (breaking)
+- **Per-node port spacing shrunk from 1000x-oversized to a tight 10-port
+  budget.** `INST_STEP` 10000 → 10, `WSREP_STEP` 1000 → 1, `SST_STEP` 2000 →
+  3, `REPL_STEP` 10000 → 10 (kept identical to `INST_STEP`). A node only
+  ever needs 4 ports (SQL, wsrep/gmcast, Galera's automatic IST listener at
+  wsrep+1, SST) — the old spacing capped a single host to ~5-6 total node
+  slots across every cluster combined, far too few for real multi-tenant
+  colocation. Any script hardcoding the old N+1000/N+2000 offsets breaks;
+  nothing else changes (CLI commands/flags are identical, only the
+  resulting port numbers differ).
+- `mh/cli.py`'s interactive wizard hardcoded the literal `10000` directly
+  instead of importing the real step constants — already silently desynced
+  from the source of truth before this release. Now imports and uses
+  `galera.INST_STEP`/`replication.REPL_STEP` directly; a regression test
+  guards against this drift recurring.
+
+### Added
+- `galera.MAX_PORT` (65535) ceiling check in `compute_node_ids`/
+  `compute_slave_ids` — a too-large topology now raises a clear
+  `ClickException` immediately instead of silently computing an invalid
+  port number that only surfaces later as a cryptic bind failure.
+
 ## [0.3.3] - 2026-08-11
 
 ### Fixed
