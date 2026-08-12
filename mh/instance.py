@@ -1,5 +1,7 @@
 import os
+import signal
 import subprocess
+import time
 from pathlib import Path
 
 import click
@@ -214,6 +216,20 @@ class Instance:
 
     @staticmethod
     def _pid_alive(pid):
+        # Opportunistically reap if this happens to be our own child (e.g.
+        # started earlier in the same long-lived process) — a killed child
+        # stays a zombie, and kill(pid, 0) keeps reporting it "alive," until
+        # something reaps it. Across separate CLI invocations (the normal
+        # case: whatever process started mariadbd has long since exited)
+        # this is a harmless no-op — os.waitpid raises ChildProcessError for
+        # a PID that isn't our child, which we simply ignore and fall
+        # through to the signal-based check.
+        try:
+            reaped_pid, _status = os.waitpid(pid, os.WNOHANG)
+            if reaped_pid == pid:
+                return False
+        except (ChildProcessError, OSError):
+            pass
         try:
             os.kill(pid, 0)
             return True
@@ -395,12 +411,109 @@ class Instance:
         return self.get_status() == "Running"
 
     def is_socket_ready(self):
-        """Checks if the instance socket file exists (server accepting connections).
+        """Checks if the instance socket FILE exists.
 
-        Unlike is_running(), this doesn't require any user authentication,
-        making it safe to use before service users are created.
+        This only proves mariadbd has bound the socket path, not that it is
+        actually accepting/answering connections yet (Galera's wsrep
+        initialization can hold that up well after the file appears) —
+        use is_accepting_connections() before doing anything that requires a
+        working connection. Kept for the narrow case of checking a file's
+        mere presence (e.g. before service users exist and no connection
+        attempt is appropriate yet).
         """
         return any(candidate.exists() for candidate in self._socket_candidates())
+
+    def is_accepting_connections(self):
+        """Checks if the server is actually answering queries yet, by really
+        connecting (as root over the unix socket — the one identity
+        guaranteed to exist immediately after mariadb-install-db, before any
+        service user has been created).
+
+        This is the real readiness signal: is_socket_ready() only proves the
+        socket file exists, which can be true well before mariadbd is done
+        initializing (especially with Galera/wsrep enabled) — code that acts
+        on is_socket_ready() alone can race ahead of a server that isn't
+        actually ready to authenticate a connection yet.
+        """
+        if not self.path:
+            return False
+        mariadb = self.path / 'bin' / 'mariadb'
+        if not mariadb.exists():
+            mariadb = self.path / 'bin' / 'mysql'
+        if not mariadb.exists():
+            return False
+        cmd = [
+            str(mariadb), '-uroot',
+            f'--socket={self.socket_path}',
+            '-e', 'SELECT 1',
+        ]
+        try:
+            process = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+        except Exception:
+            return False
+        return process.returncode == 0
+
+    def find_pid(self):
+        """Finds this instance's live mariadbd PID from its PID file, or None.
+
+        Unlike is_running() (which authenticates as the service admin user),
+        this never touches the database at all — it only reads the PID file
+        and confirms the OS process is alive, so it stays reliable even if
+        the admin user was never successfully created (e.g. a deploy that
+        failed before create_service_users() succeeded).
+        """
+        for pid_file in self._pid_candidates():
+            if not pid_file.exists():
+                continue
+            try:
+                raw = pid_file.read_text().strip()
+                pid = int(raw.split()[0] if raw else "")
+            except Exception:
+                continue
+            if self._pid_alive(pid):
+                return pid
+        return None
+
+    def terminate(self, timeout=15):
+        """Forcibly ensures this instance's process is dead, independent of
+        any database-level shutdown (mariadb-admin needs the admin user to
+        exist, which a partially-failed deploy may never have created).
+
+        Sends SIGTERM, waits up to `timeout` seconds, then SIGKILLs if it's
+        still alive. Safe to call when nothing is running (no-op). Deleting
+        an instance's files while its process is still alive leaves an
+        orphan holding deleted files open — always call this (or otherwise
+        confirm find_pid() is None) before removing an instance's directory.
+        """
+        pid = self.find_pid()
+        if pid is None:
+            return
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            return
+        except PermissionError:
+            raise click.ClickException(
+                f"Cannot stop instance {self.id} (pid {pid}): permission denied. "
+                f"Run with sudo?"
+            )
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if not self._pid_alive(pid):
+                return
+            time.sleep(0.5)
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            return
+        # Give the kernel a moment to actually reap/release it.
+        for _ in range(10):
+            if not self._pid_alive(pid):
+                return
+            time.sleep(0.5)
+        raise click.ClickException(
+            f"Instance {self.id} (pid {pid}) would not die even after SIGKILL."
+        )
 
     def wsrep_local_state_comment(self):
         """Returns the Galera wsrep_local_state_comment status value (e.g.

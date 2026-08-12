@@ -187,6 +187,15 @@ def teardown_instance(instance_id, purge=False):
             inst.stop()
     except Exception:
         pass
+    # is_running()/stop() authenticate as the service admin user, which a
+    # partially-failed deploy may never have created — in that case
+    # is_running() falsely reports "not running" even though mariadbd is
+    # very much alive, stop() above never fires, and deleting the directory
+    # next would orphan a live process holding deleted files open (hit in
+    # production). find_pid()/terminate() are PID-based, not DB-auth-based,
+    # so they catch exactly that case as a safety net regardless of whether
+    # the graceful stop above actually worked.
+    inst.terminate()
 
     if purge:
         try:
@@ -325,6 +334,13 @@ def create_service_users(instance, retries=5, repl_host='localhost'):
 
     Idempotent — safe to run repeatedly; always re-applies grants. `repl_host`
     widens the async-replication user's grant host for cross-host slaves.
+
+    Returns True on success, False if every attempt failed (callers that can
+    tolerate proceeding without service users — e.g. a defensive re-assert
+    before stop — may treat False as a warning; callers whose correctness
+    depends on these users existing, like the initial deploy path, must
+    raise instead of letting the deploy limp forward into a guaranteed
+    failure further down the line).
     """
     mariadb = instance.path / 'bin' / 'mariadb'
     if not mariadb.exists():
@@ -346,7 +362,7 @@ def create_service_users(instance, retries=5, repl_host='localhost'):
     else:
         output = (process.stderr or process.stdout or '(no output)').strip()
         report.warn(f"Warning: user creation failed:\n{output}")
-        return
+        return False
 
     cmd_extra = [
         str(mariadb), '-uroot',
@@ -357,3 +373,4 @@ def create_service_users(instance, retries=5, repl_host='localhost'):
     # Ignore errors — older versions don't have these privilege names.
 
     report.success("Service users/grants ensured.")
+    return True

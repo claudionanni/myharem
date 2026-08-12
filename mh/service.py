@@ -47,14 +47,26 @@ def start_instance(instance_id, bootstrap=False):
         )
     else:
         # Bootstrap node or non-Galera: create users after start.
+        #
+        # is_socket_ready() only proves mariadbd has bound the socket file —
+        # with Galera/wsrep enabled, real query-serving readiness can lag
+        # meaningfully behind that (observed in production: the socket file
+        # appeared, but the server refused connections for several seconds
+        # after). Waiting for is_accepting_connections() (a real connection
+        # attempt) instead closes that race at its source.
         report.log(f"Waiting for instance {instance_id} to be ready...", nl=False)
         for _ in range(60):
             time.sleep(1)
             report.log(".", nl=False)
-            if instance.is_socket_ready():
-                time.sleep(2)
+            if instance.is_accepting_connections():
                 report.log(" OK", fg='green')
-                deployment.create_service_users(instance)
+                if not deployment.create_service_users(instance):
+                    raise click.ClickException(
+                        f"Instance {instance_id} started, but its service "
+                        f"users/grants could not be created — a joiner "
+                        f"depending on the SST user would fail confusingly "
+                        f"much later instead. Check log: mh log {instance_id}"
+                    )
                 return
         report.log("")
         raise click.ClickException(

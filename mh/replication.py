@@ -25,6 +25,18 @@ def _now():
     return datetime.now(timezone.utc).isoformat()
 
 
+def _ensure_service_users(instance, repl_host='localhost'):
+    """create_service_users(), raising clearly on failure instead of letting
+    a replication wire-up proceed with a REPL_USER that doesn't exist — that
+    would otherwise surface much later as a confusing CHANGE MASTER/START
+    SLAVE authentication failure instead of a clear one right here."""
+    if not deployment.create_service_users(instance, repl_host=repl_host):
+        raise click.ClickException(
+            f"Instance {instance.id} started, but its service users/grants "
+            f"could not be created. Check log: mh log {instance.id}"
+        )
+
+
 def _relay_log_config(instance_path, slave_id):
     """Relay-log settings anchored to absolute paths in the instance's own
     datadir. A bare relative basename (e.g. `relay-bin.20000`) leaves
@@ -110,7 +122,7 @@ def deploy_replication(tarball_path, master_instance_id, slaves=1):
         master = Instance(str(master_id))
         master.start()
         _wait_for_instance(master)
-        deployment.create_service_users(master)
+        _ensure_service_users(master)
 
         change_master_sql = (
             "CHANGE MASTER TO "
@@ -124,7 +136,7 @@ def deploy_replication(tarball_path, master_instance_id, slaves=1):
             slave = Instance(str(slave_id))
             slave.start()
             _wait_for_instance(slave)
-            deployment.create_service_users(slave)
+            _ensure_service_users(slave)
             slave.run_sql(change_master_sql)
             slave.run_sql("START SLAVE")
     except Exception:
@@ -170,7 +182,7 @@ def deploy_master(tarball_path, master_instance_id, advertise="127.0.0.1"):
         master.start()
         _wait_for_instance(master)
         repl_host = "localhost" if advertise == "127.0.0.1" else "%"
-        deployment.create_service_users(master, repl_host=repl_host)
+        _ensure_service_users(master, repl_host=repl_host)
     except Exception:
         report.error("Master deploy failed — rolling back.")
         deployment.rollback_instances(deployed)
@@ -208,7 +220,7 @@ def deploy_slave(tarball_path, slave_instance_id, master_host, master_port,
         slave.start()
         _wait_for_instance(slave)
         repl_host = "localhost" if advertise == "127.0.0.1" else "%"
-        deployment.create_service_users(slave, repl_host=repl_host)
+        _ensure_service_users(slave, repl_host=repl_host)
         slave.run_sql(
             "CHANGE MASTER TO "
             f"MASTER_HOST='{master_host}', "
@@ -245,11 +257,17 @@ def _node_info(instance_id, role, path):
 
 
 def _wait_for_instance(instance, timeout=WAIT_TIMEOUT):
-    """Waits for an instance socket to become ready; raises on timeout."""
+    """Waits for an instance to actually accept connections; raises on timeout.
+
+    is_socket_ready() only proves the socket file exists, which can be true
+    well before mariadbd is actually ready to answer a query (observed in
+    production) — is_accepting_connections() closes that race by really
+    connecting instead of trusting a proxy signal.
+    """
     report.log(f"Waiting for instance {instance.id} to be ready...", nl=False)
     elapsed = 0
     while elapsed < timeout:
-        if instance.is_socket_ready():
+        if instance.is_accepting_connections():
             report.log(" OK", fg="green")
             return
         report.log(".", nl=False)

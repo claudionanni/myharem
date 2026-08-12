@@ -7,6 +7,7 @@ structured results, manifest recording, and rollback — not a live server.
 
 import getpass
 import json
+import subprocess
 from pathlib import Path
 
 import click
@@ -225,6 +226,66 @@ def test_start_instance_joiner_times_out_if_never_synced(monkeypatch):
         service.start_instance("30000", bootstrap=False)
 
 
+# ---- bootstrap/non-joiner readiness must be connection-based, not socket-file-based
+# (the false-success bug's sibling: is_socket_ready() can be True well before
+# mariadbd, with Galera/wsrep enabled, is actually answering queries) ----
+
+class _FakeBootstrapInstance:
+    """A bootstrap node whose socket FILE exists immediately but that doesn't
+    actually accept connections until `connectable_after` polls -- reproducing
+    the real production timing bug (is_socket_ready() true, then an immediate
+    'Connection refused' on the very next real query)."""
+
+    def __init__(self, connectable_after):
+        self.id = "40000"
+        self._polls = 0
+        self._connectable_after = connectable_after
+        self.started_with = None
+
+    def _require_exists(self):
+        pass
+
+    def start(self, wsrep_new_cluster=False):
+        self.started_with = wsrep_new_cluster
+
+    def is_socket_ready(self):
+        return True
+
+    def is_accepting_connections(self):
+        self._polls += 1
+        return self._polls >= self._connectable_after
+
+
+def test_start_instance_waits_for_a_real_connection_before_creating_users(monkeypatch):
+    fake = _FakeBootstrapInstance(connectable_after=3)
+    monkeypatch.setattr(service, "Instance", lambda instance_id: fake)
+    monkeypatch.setattr(service, "_is_galera_instance", lambda instance: False)
+    monkeypatch.setattr(service.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(deployment, "create_service_users", lambda inst: True)
+
+    service.start_instance("40000", bootstrap=True)
+
+    # Declared ready only once a real connection actually succeeded, not on
+    # the first is_socket_ready() poll (always True for this fake).
+    assert fake._polls == 3
+    assert fake.started_with is True
+
+
+def test_start_instance_raises_clearly_when_service_users_fail_to_create(monkeypatch):
+    """Regression: user creation failing used to only warn and let the deploy
+    limp forward -- a downstream joiner would then fail confusingly 5 minutes
+    later with no obvious link to the real cause. Must fail fast, right here,
+    instead."""
+    fake = _FakeBootstrapInstance(connectable_after=1)
+    monkeypatch.setattr(service, "Instance", lambda instance_id: fake)
+    monkeypatch.setattr(service, "_is_galera_instance", lambda instance: False)
+    monkeypatch.setattr(service.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(deployment, "create_service_users", lambda inst: False)
+
+    with pytest.raises(click.ClickException, match="service users/grants could not be created"):
+        service.start_instance("40000", bootstrap=False)
+
+
 # ---- galera provider resolution (the linux-x86_64 "no bundled Galera" bug) ----
 
 def _bare_instance_stub(basedir, monkeypatch):
@@ -349,7 +410,7 @@ def test_deploy_replication_records_result(stub_deploy, monkeypatch):
     monkeypatch.setattr(replication, "_wait_for_instance",
                         lambda inst, timeout=30: None)
     monkeypatch.setattr(deployment, "create_service_users",
-                        lambda inst, retries=5: None)
+                        lambda inst, retries=5, repl_host='localhost': True)
     monkeypatch.setattr("mh.instance.Instance.start",
                         lambda self, wsrep_new_cluster=False: None)
     monkeypatch.setattr("mh.instance.Instance.run_sql",
@@ -369,6 +430,30 @@ def test_deploy_replication_records_result(stub_deploy, monkeypatch):
     slave_datadir = Path(result.nodes[1].path) / "data"
     assert f"relay_log={slave_datadir / 'relay-bin.3010'}" in slave_my_cnf
     assert f"relay_log_index={slave_datadir / 'relay-bin.3010.index'}" in slave_my_cnf
+
+
+def test_deploy_replication_raises_and_rolls_back_when_master_grants_fail(
+    stub_deploy, monkeypatch,
+):
+    """Sibling of the galera bootstrap fix: a replication slave depends on
+    REPL_USER existing on the master. Silently continuing past a failed grant
+    step would surface later as a confusing CHANGE MASTER/START SLAVE auth
+    failure instead of a clear one right at the source."""
+    monkeypatch.setattr(replication, "_wait_for_instance",
+                        lambda inst, timeout=30: None)
+    monkeypatch.setattr(deployment, "create_service_users",
+                        lambda inst, retries=5, repl_host='localhost': False)
+    monkeypatch.setattr("mh.instance.Instance.start",
+                        lambda self, wsrep_new_cluster=False: None)
+    rolled_back = []
+    monkeypatch.setattr(deployment, "rollback_instances", rolled_back.append)
+
+    with pytest.raises(click.ClickException, match="service users/grants could not be created"):
+        replication.deploy_replication("fake-11.8.6.tar.gz", "4000", slaves=1)
+
+    # Rolled back exactly what had actually been deployed (master + slave),
+    # not left as orphaned instances.
+    assert rolled_back == [["4000", "4010"]]
 
 
 # ---- instance id uniqueness (the duplicate-.39000 resolution bug) ----
@@ -411,6 +496,101 @@ def test_purge_reports_failure_when_nothing_removed(basedir, monkeypatch):
     with pytest.raises(click.ClickException, match="Purge removed nothing"):
         deployment.teardown_instance("52000", purge=True)
     assert d.exists()  # untouched — and the caller was told, not misled
+
+
+# ---- create_service_users reports success/failure instead of only logging ----
+
+def test_create_service_users_returns_true_on_success(basedir, monkeypatch):
+    d = basedir / "instances" / "v.58000"
+    (d / "bin").mkdir(parents=True)
+    (d / "bin" / "mariadb").touch()
+    from mh.instance import Instance
+
+    monkeypatch.setattr(
+        subprocess, "run",
+        lambda *a, **k: subprocess.CompletedProcess(a, 0, stdout="", stderr=""),
+    )
+    assert deployment.create_service_users(Instance("58000")) is True
+
+
+def test_create_service_users_returns_false_after_exhausting_retries(basedir, monkeypatch):
+    d = basedir / "instances" / "v.58010"
+    (d / "bin").mkdir(parents=True)
+    (d / "bin" / "mariadb").touch()
+    from mh.instance import Instance
+
+    monkeypatch.setattr(deployment, "time", type("T", (), {"sleep": staticmethod(lambda s: None)}))
+    monkeypatch.setattr(
+        subprocess, "run",
+        lambda *a, **k: subprocess.CompletedProcess(a, 1, stdout="", stderr="Access denied"),
+    )
+    assert deployment.create_service_users(Instance("58010"), retries=2) is False
+
+
+# ---- process-liveness must be PID-based, not DB-auth-based (the orphaned
+# mariadbd-after-rollback bug: is_running()/stop() authenticate as the service
+# admin user, which a partially-failed deploy may never have created, so they
+# falsely report "not running" for a process that is very much alive) ----
+
+def test_find_pid_reads_the_pid_file_and_confirms_liveness(basedir):
+    from mh.instance import Instance
+    d = basedir / "instances" / "v.53000"
+    d.mkdir(parents=True)
+    proc = subprocess.Popen(["sleep", "30"])
+    try:
+        (d / "53000.pid").write_text(str(proc.pid))
+        assert Instance("53000").find_pid() == proc.pid
+    finally:
+        proc.terminate()
+        proc.wait(timeout=5)
+
+
+def test_find_pid_ignores_a_pid_file_for_an_already_dead_process(basedir):
+    from mh.instance import Instance
+    d = basedir / "instances" / "v.54000"
+    d.mkdir(parents=True)
+    proc = subprocess.Popen(["true"])
+    proc.wait()
+    (d / "54000.pid").write_text(str(proc.pid))
+    assert Instance("54000").find_pid() is None
+
+
+def test_terminate_kills_a_real_running_process(basedir):
+    from mh.instance import Instance
+    d = basedir / "instances" / "v.55000"
+    d.mkdir(parents=True)
+    proc = subprocess.Popen(["sleep", "30"])
+    (d / "55000.pid").write_text(str(proc.pid))
+    Instance("55000").terminate(timeout=5)
+    assert proc.wait(timeout=5) is not None  # process actually exited
+
+
+def test_terminate_is_a_noop_when_nothing_is_running(basedir):
+    from mh.instance import Instance
+    d = basedir / "instances" / "v.56000"
+    d.mkdir(parents=True)
+    Instance("56000").terminate()  # must not raise
+
+
+def test_teardown_kills_an_orphan_even_when_is_running_falsely_reports_stopped(
+    basedir, monkeypatch,
+):
+    """The exact production regression: is_running() (DB-auth-based) says
+    "not running" even though mariadbd is alive, because the admin user was
+    never created -- teardown must still find and kill the real process
+    before deleting its directory, or it orphans a live process holding
+    deleted files open."""
+    d = basedir / "instances" / "v.57000"
+    d.mkdir(parents=True)
+    proc = subprocess.Popen(["sleep", "30"])
+    (d / "57000.pid").write_text(str(proc.pid))
+
+    monkeypatch.setattr("mh.instance.Instance.is_running", lambda self: False)
+
+    deployment.teardown_instance("57000", purge=True)
+
+    assert proc.wait(timeout=5) is not None  # terminate() killed it despite the lie
+    assert not d.exists()
 
 
 # ---- CLI smoke ----

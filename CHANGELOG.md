@@ -2,6 +2,39 @@
 
 All notable changes to MyHarem are documented here.
 
+## [0.4.1] - 2026-08-12
+
+### Fixed
+- **Premature "instance ready" declaration on the bootstrap/non-joiner start
+  path.** `is_socket_ready()` only proves mariadbd bound its socket file —
+  with Galera/wsrep enabled, real query-serving readiness can lag
+  meaningfully behind that (observed in production: the socket appeared but
+  the server refused connections for several seconds after). This raced
+  `create_service_users()`, which could hit the still-refusing server, warn,
+  and let a deploy proceed with no SST/replication user — surfacing minutes
+  later as a confusing joiner SST timeout or slave auth failure with no
+  obvious link back to the real cause. Added `Instance.is_accepting_connections()`
+  (a real `SELECT 1` over the socket) and made `service.py`'s bootstrap path
+  and `replication.py`'s `_wait_for_instance()` gate on it instead of the
+  socket-file check + blind sleep. The Galera-joiner path already had an
+  equivalent real-readiness check (`wsrep_local_state_comment() ==
+  "Synced"`, added in 0.3.1) and is unaffected.
+- **`create_service_users()` failures were silently swallowed.** Exhausting
+  all retries only logged a warning and returned, letting the deploy
+  proceed into a guaranteed-to-fail state. Now returns `True`/`False`;
+  every call site raises a clear `ClickException` naming the instance and
+  log location on failure instead of failing confusingly much later.
+- **Rollback/teardown could orphan a live `mariadbd` process.** `is_running()`
+  and `stop()` authenticate as the service admin user — if that user was
+  never created (e.g. due to the bug above), `is_running()` falsely reports
+  "not running," so `teardown_instance()` skipped `stop()` and deleted the
+  instance directory out from under a still-running process (confirmed live
+  in production: `mariadbd` kept running with its datadir already deleted).
+  Added `Instance.find_pid()`/`Instance.terminate()`, which check OS-level
+  process liveness via the PID file rather than DB auth, and `teardown_instance()`
+  now always calls `terminate()` as a safety net regardless of what
+  `is_running()` reported.
+
 ## [0.4.0] - 2026-08-11
 
 ### Changed (breaking)
