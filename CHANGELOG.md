@@ -27,6 +27,12 @@ All notable changes to MyHarem are documented here.
   - Refusing without a token still lists the published Enterprise series — that
     endpoint needs no token, so there was no reason to answer a question about
     versions with nothing but "set a variable".
+  - Any published release is reachable, not just the newest: `--version 11.4`
+    takes the newest in a series while `--version 10.6.18` takes exactly that
+    one, and the wizard's release menu shows the newest 10 with a `[0] show all`
+    entry. A truncated list with no way past it would have hidden most of a long
+    series (10.6 publishes 28 releases) — and an old release is frequently the
+    whole point of a reproduction.
 - `mh --version` (0.4.1 shipped without one, so a bug report could not say which
   build it came from). `setup.py` now reads `__version__` from the package.
 

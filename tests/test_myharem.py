@@ -1072,3 +1072,47 @@ def test_es_refusal_mentions_sudo_dash_e_when_under_sudo(basedir, monkeypatch):
     result = CliRunner().invoke(main, ['download', '-e', 'ES', '-v', '11.4'])
     assert result.exit_code != 0
     assert 'sudo -E' in result.output
+
+
+CS_SERIES_LONG = json.dumps({
+    "releases": {f"11.4.{n}": {} for n in range(0, 14)}
+})
+
+CS_VERSION_11_4_2 = json.dumps({
+    "release_data": {
+        "11.4.2": {
+            "files": [
+                {"file_name": "mariadb-11.4.2-linux-systemd-x86_64.tar.gz",
+                 "package_type": "gzipped tar file", "os": "Linux", "cpu": "x86_64",
+                 "checksum": {"sha256sum": "OLD"},
+                 "file_download_url": "http://example.org/old.tar.gz"},
+            ]
+        }
+    }
+})
+
+
+def test_wizard_can_reach_a_release_past_the_first_ten(basedir, monkeypatch):
+    """A long series must not hide older releases — those are the reproductions."""
+    routes = {
+        "rest-api/mariadb/11.4/": CS_SERIES_LONG,
+        "rest-api/mariadb/11.4.2/": CS_VERSION_11_4_2,
+        "rest-api/mariadb/": CS_INDEX,
+    }
+    monkeypatch.setattr(catalog, '_fetch_url', _canned_fetch(routes))
+    monkeypatch.setattr(deployment, '_download',
+                        lambda url, dest, timeout=300: Path(dest).write_bytes(b'tar'))
+    monkeypatch.setattr(cli_module, '_stdin_is_tty', lambda: True)
+    # edition 1, series 1, "0" = show all, then the 12th entry (11.4.2), confirm.
+    result = CliRunner().invoke(main, ['download', '--no-verify'],
+                                input="1\n1\n0\n12\ny\n")
+    assert result.exit_code == 0, result.output
+    assert 'show all 14' in result.output
+    assert '→ 11.4.2' in result.output
+    assert (basedir / 'local' / 'mariadb-11.4.2-linux-systemd-x86_64.tar.gz').exists()
+
+
+def test_series_listing_says_how_to_see_the_releases(basedir, monkeypatch):
+    monkeypatch.setattr(catalog, '_fetch_url', _canned_fetch(CS_ROUTES))
+    result = CliRunner().invoke(main, ['download', '--list', '-e', 'CS'])
+    assert '--version <series>' in result.output

@@ -91,31 +91,54 @@ sudo mh deploy mariadb-11.8.6-linux-x86_64.tar.gz 18000   # found in local/
 
 ### Download
 
-Fetches a tarball from the official download sites into `local/`, where the
-deploy commands look. Interactive with no arguments, flag-driven for scripts:
+Fetches a tarball from the official download sites into `local/`, where every
+deploy command looks for it.
+
+- `mh download` — interactive: pick edition, series and release. The release
+  menu shows the newest 10 with a `[0] show all` entry, so an older release in a
+  long series (10.6 has 28) is still two keystrokes away.
+- `mh download --edition CS|ES --version <series|version>` — non-interactive.
+  A series (`11.4`) takes the newest release in it; a version (`11.4.13`, or an
+  Enterprise build `11.4.13-10`) takes exactly that one.
+- `mh download --list --edition CS [--version <series>]` — what is published,
+  without downloading anything. Honours `--json`.
+- `mh download ... --target <bintar>` — Enterprise only; overrides the
+  per-distribution tarball detected for this host.
+- `mh download ... --no-verify` — skip the published sha256 check.
+- `mh fetch-tarball <url> [--name FILENAME]` — download from a URL you already
+  have, for anything the catalogue does not cover.
+
+Both are idempotent: a file already staged under that name is left alone.
 
 ```bash
 sudo mh download                                     # pick edition, series, release
 sudo mh download --edition CS --version 11.4         # newest release in the series
 sudo mh download --edition CS --version 11.4.13      # exactly that one
-sudo mh download --list --edition CS                 # what is published
+sudo mh download --edition CS --version 10.6.18      # an older release
+sudo mh download --list --edition CS                 # the series
+sudo mh download --list --edition CS --version 10.6  # the releases in one
 ```
 
-Community comes from `downloads.mariadb.org` and needs no credentials. The
-published **sha256 is verified** before the file is put in place (`--no-verify`
-skips it), and the build chosen is always the one that bundles the Galera
-provider — so a downloaded tarball never hits the problem described under
-*Galera provider* below.
+**Community** comes from `downloads.mariadb.org` and needs no credentials. The
+published **sha256 is verified** before the file is put in place, and the build
+chosen is always the one that bundles the Galera provider — so a downloaded
+tarball never hits the problem described under *Galera provider* below.
 
-**Enterprise** comes from `dlm.mariadb.com` and needs a customer token:
+#### Enterprise downloads and the token
+
+Enterprise comes from `dlm.mariadb.com` and needs a customer token; without one
+the command refuses, though it still lists the published Enterprise series so
+you can see what you are missing. Enterprise publishes **one tarball per
+distribution**, not just per architecture, so the right one for this host is
+detected from `/etc/os-release` and `--target rhel-9-x86_64` overrides it.
 
 ```bash
 export MYHAREM_ES_TOKEN=...
-sudo -E mh download --edition ES --version 11.4     # -E: see below
+sudo -E mh download --edition ES --version 11.4     # note the -E
 ```
 
-**`sudo` resets the environment**, so plain `sudo mh download` does not see
-`MYHAREM_ES_TOKEN` and refuses as if it were never set. Either pass `-E`, or add
+**`sudo` resets the environment**, so a plain `sudo mh download` does not see
+`MYHAREM_ES_TOKEN` and refuses as if it were never set. Either pass `-E`, add
 `Defaults env_keep += "MYHAREM_ES_TOKEN"` to sudoers, or keep the token in the
 config file instead:
 
@@ -124,23 +147,10 @@ printf 'es_token=...\n' | sudo tee -a /etc/myharem.conf > /dev/null
 sudo chmod 600 /etc/myharem.conf        # it is installed world-readable
 ```
 
-Do **not** write it as `sudo MYHAREM_ES_TOKEN=... mh download`: that puts the
-token in your shell history and in `ps`, which is the whole thing this avoids.
-
-Without it the command refuses (it still lists the published Enterprise series,
-so you can see what you are missing). Enterprise publishes **one tarball per
-distribution**, not just per architecture, so the right one for this host is
-detected from `/etc/os-release`; `--target rhel-9-x86_64` overrides it. There is
-deliberately no `--token` flag — it would put the token in your shell history
-and in `ps`.
-
-```bash
-sudo mh fetch-tarball <url> [--name FILENAME]
-```
-
-...downloads a tarball from a URL you already have, for anything the catalogue
-does not cover. Both are idempotent: a file already staged under that name is
-left alone.
+There is deliberately no `--token` flag, and you should not write
+`sudo MYHAREM_ES_TOKEN=... mh download` either: the token is a path segment of
+the download URL, so either would put a working credential in your shell history
+and in `ps`, where every user on the host can read it.
 
 ### Deploy
 

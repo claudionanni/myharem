@@ -78,6 +78,10 @@ def fetch_tarball_command(ctx, url, filename):
 
 # ---------- download ----------
 
+# How many releases the wizard lists before offering 'show all'.
+_RELEASES_SHOWN = 10
+
+
 def _stdin_is_tty():
     """Indirection so the interactive tests can pretend to be a terminal.
 
@@ -258,6 +262,8 @@ def _list_catalog(ctx, edition, version):
             payload = {'edition': 'CS',
                        'series': [{'id': s.id, 'status': s.status} for s in series]}
             human = "\n".join(f"  {s.id:<8} {s.label()}" for s in series)
+            human += ("\n\nAdd --version <series> to list the releases in one, "
+                      "e.g. --list --edition CS --version 10.6")
     else:
         if version:
             token = _es_token_or_refuse()
@@ -268,6 +274,8 @@ def _list_catalog(ctx, edition, version):
             series = catalog.list_es_series()
             payload = {'edition': 'ES', 'series': series}
             human = "\n".join(f"  {s}" for s in series)
+            human += ("\n\nAdd --version <series> to list the builds in one, "
+                      "e.g. --list --edition ES --version 11.4")
     _emit_action(ctx, payload, human)
 
 
@@ -311,12 +319,26 @@ def _download_wizard(ctx, edition, target, verify):
     else:
         releases = catalog.list_es_releases(series, config.get_es_token())
 
-    shown = releases[:10]
-    click.echo(f"\nReleases in {series}:")
-    for i, release in enumerate(shown, 1):
-        click.echo(f"  [{i}] {release}")
-    choice = click.prompt("\nSelect release", type=click.IntRange(1, len(shown)),
-                          default=1)
+    # Newest first, truncated — but never truncated with no way out: a long
+    # series has far more than fits on a screen (10.6 has 28), and the whole
+    # point of reproducing a customer's problem is often an OLD release.
+    shown = releases[:_RELEASES_SHOWN]
+    while True:
+        click.echo(f"\nReleases in {series}:")
+        for i, release in enumerate(shown, 1):
+            click.echo(f"  [{i}] {release}")
+        truncated = len(shown) < len(releases)
+        if truncated:
+            click.echo(f"  [0] show all {len(releases)}")
+        choice = click.prompt(
+            "\nSelect release",
+            type=click.IntRange(0 if truncated else 1, len(shown)),
+            default=1,
+        )
+        if choice == 0:
+            shown = releases
+            continue
+        break
     release = shown[choice - 1]
     click.echo(f"  → {release}")
 
