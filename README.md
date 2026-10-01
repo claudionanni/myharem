@@ -33,6 +33,8 @@ admin_password=
 sst_password=sstpwd
 # optional: Galera provider for tarballs that don't bundle it (see Galera notes)
 # wsrep_provider=/path/to/libgalera_smm.so
+# optional: customer token for `mh download --edition ES` (see Download)
+# es_token=
 ```
 
 The first run creates the directory tree under `basedir`:
@@ -83,7 +85,49 @@ MyHarem looks in `basedir/local/`:
 sudo mh deploy mariadb-11.8.6-linux-x86_64.tar.gz 18000   # found in local/
 ```
 
+`mh download` puts tarballs there for you — see below.
+
 ## Commands
+
+### Download
+
+Fetches a tarball from the official download sites into `local/`, where the
+deploy commands look. Interactive with no arguments, flag-driven for scripts:
+
+```bash
+sudo mh download                                     # pick edition, series, release
+sudo mh download --edition CS --version 11.4         # newest release in the series
+sudo mh download --edition CS --version 11.4.13      # exactly that one
+sudo mh download --list --edition CS                 # what is published
+```
+
+Community comes from `downloads.mariadb.org` and needs no credentials. The
+published **sha256 is verified** before the file is put in place (`--no-verify`
+skips it), and the build chosen is always the one that bundles the Galera
+provider — so a downloaded tarball never hits the problem described under
+*Galera provider* below.
+
+**Enterprise** comes from `dlm.mariadb.com` and needs a customer token:
+
+```bash
+export MYHAREM_ES_TOKEN=...            # or es_token= in myharem.conf (chmod 600)
+sudo mh download --edition ES --version 11.4
+```
+
+Without it the command refuses (it still lists the published Enterprise series,
+so you can see what you are missing). Enterprise publishes **one tarball per
+distribution**, not just per architecture, so the right one for this host is
+detected from `/etc/os-release`; `--target rhel-9-x86_64` overrides it. There is
+deliberately no `--token` flag — it would put the token in your shell history
+and in `ps`.
+
+```bash
+sudo mh fetch-tarball <url> [--name FILENAME]
+```
+
+...downloads a tarball from a URL you already have, for anything the catalogue
+does not cover. Both are idempotent: a file already staged under that name is
+left alone.
 
 ### Deploy
 
@@ -111,6 +155,9 @@ Galera needs the provider library. **Which tarballs bundle it:**
 | `mariadb-enterprise-*-rhel-*` (ES binary) | ✅ `lib/libgalera_enterprise_smm.so` |
 | `mariadb-*-linux-x86_64` (generic glibc) | ❌ **not bundled** |
 | source / RPM-bundle tarballs | ❌ not a bindist |
+
+`mh download --edition CS` always picks the `linux-systemd` build, so a tarball
+obtained that way bundles the provider and none of this applies.
 
 MyHarem auto-detects the library inside the tarball. If it isn't there, the
 deploy **fails immediately with a clear message** (rather than a cryptic

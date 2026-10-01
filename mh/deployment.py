@@ -1,3 +1,4 @@
+import hashlib
 import shutil
 import subprocess
 import time
@@ -42,6 +43,78 @@ def _download(url, dest, timeout=300):
         shutil.copyfileobj(response, out)
 
 
+def _sha256(path, chunk=1 << 20):
+    """sha256 of a file, read in chunks so a 600MB tarball never lands in RAM."""
+    digest = hashlib.sha256()
+    with open(path, 'rb') as handle:
+        for block in iter(lambda: handle.read(chunk), b''):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def stage_tarball(url, filename, *, label=None, sha256=None, verify=True,
+                  timeout=300):
+    """Stages one tarball into <basedir>/local/. The core fetch_tarball sits on.
+
+    `label` is what appears in progress lines and error messages INSTEAD of the
+    URL. It exists because a MariaDB Enterprise download URL carries the
+    customer token as a path segment, so for those the URL must never be
+    printed; callers pass the filename instead. fetch_tarball passes the URL,
+    which reproduces its original messages exactly.
+
+    `sha256`, when known, is verified against the .part file BEFORE it is
+    renamed into place — a corrupt download must never become a name that
+    `resolve_tarball` will later hand to tar, because the staged-file check is
+    by name only and would trust it forever after.
+    """
+    label = label if label is not None else url
+
+    local_dir = config.get_basedir() / 'local'
+    local_dir.mkdir(parents=True, exist_ok=True)
+    dest = local_dir / filename
+
+    if dest.exists():
+        if sha256 and verify:
+            actual = _sha256(dest)
+            if actual != sha256.lower():
+                raise click.ClickException(
+                    f"{dest} is already staged but its sha256 does not match the "
+                    f"published one (expected {sha256}, got {actual}). It may be a "
+                    f"truncated download. Delete it and retry, or pass --no-verify."
+                )
+            report.log(f"Tarball already staged, checksum verified: {dest}")
+            return dest
+        report.log(f"Tarball already staged: {dest}")
+        return dest
+
+    report.log(f"Fetching tarball from {label} ...")
+    tmp_dest = dest.with_suffix(dest.suffix + '.part')
+    try:
+        _download(url, tmp_dest, timeout=timeout)
+        if sha256 and verify:
+            actual = _sha256(tmp_dest)
+            if actual != sha256.lower():
+                raise click.ClickException(
+                    f"Checksum mismatch for {label} — expected sha256 {sha256}, "
+                    f"got {actual}. The download was discarded; retry (a mirror "
+                    f"may have served a corrupt or stale file)."
+                )
+        tmp_dest.rename(dest)
+    except click.ClickException:
+        # Already a clear message (e.g. the mismatch above) — do not nest it
+        # inside "Failed to fetch tarball from ...".
+        tmp_dest.unlink(missing_ok=True)
+        raise
+    except Exception as exc:
+        tmp_dest.unlink(missing_ok=True)
+        raise click.ClickException(
+            f"Failed to fetch tarball from {label}: {report.redact(str(exc))}"
+        ) from None
+
+    report.success(f"Tarball staged at {dest}")
+    return dest
+
+
 def fetch_tarball(url, filename=None):
     """Downloads a tarball into <basedir>/local/ if not already staged there.
 
@@ -56,25 +129,10 @@ def fetch_tarball(url, filename=None):
     if not name:
         raise click.ClickException(f"Could not determine a filename from URL: {url}")
 
-    local_dir = config.get_basedir() / 'local'
-    local_dir.mkdir(parents=True, exist_ok=True)
-    dest = local_dir / name
-
-    if dest.exists():
-        report.log(f"Tarball already staged: {dest}")
-        return dest
-
-    report.log(f"Fetching tarball from {url} ...")
-    tmp_dest = dest.with_suffix(dest.suffix + '.part')
-    try:
-        _download(url, tmp_dest)
-        tmp_dest.rename(dest)
-    except Exception as exc:
-        tmp_dest.unlink(missing_ok=True)
-        raise click.ClickException(f"Failed to fetch tarball from {url}: {exc}")
-
-    report.success(f"Tarball staged at {dest}")
-    return dest
+    # label=url keeps this command's output byte-identical to before the
+    # stage_tarball split — MSRS parses nothing, but its logs are the record of
+    # what was fetched.
+    return stage_tarball(url, name, label=url)
 
 
 def deploy_instance(tarball_path, instance_id, init_db=True):

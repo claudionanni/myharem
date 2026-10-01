@@ -6,6 +6,8 @@ from pathlib import Path
 
 import click
 
+from . import report
+
 
 def get_config():
     """Gets the configuration from the myharem.conf file.
@@ -84,6 +86,73 @@ def get_wsrep_provider():
         return env_value
     config = get_config()
     return config.get('DEFAULT', 'wsrep_provider', fallback=None) or None
+
+
+def get_es_token():
+    """Customer token for MariaDB Enterprise downloads (dlm.mariadb.com).
+
+    Resolution: MYHAREM_ES_TOKEN env, then `es_token` in the config file, then
+    None. The token is a PATH SEGMENT of the DLM URL, which makes the resulting
+    download URL a secret in its own right — hence no --token flag anywhere
+    (it would land in shell history and in `ps`).
+
+    Prefer the environment variable: install.sh installs /etc/myharem.conf
+    world-readable, so a token kept there is readable by every user on the host.
+    warn_if_config_is_world_readable() says so when it matters.
+    """
+    env_value = os.environ.get('MYHAREM_ES_TOKEN')
+    if env_value:
+        return env_value
+    config = get_config()
+    return config.get('DEFAULT', 'es_token', fallback=None) or None
+
+
+def es_token_came_from_config():
+    """True when the token is being read from the config file, not the env.
+
+    Only then is the file's mode worth complaining about.
+    """
+    if os.environ.get('MYHAREM_ES_TOKEN'):
+        return False
+    config = get_config()
+    return bool(config.get('DEFAULT', 'es_token', fallback=None))
+
+
+def warn_if_config_is_world_readable():
+    """Warns when the config file holding the ES token is readable by others.
+
+    install.sh installs /etc/myharem.conf mode 644, so the default placement of
+    a customer token is a world-readable file. Warn rather than refuse: the
+    token is the user's to place where they like, and refusing would break a
+    working setup.
+    """
+    if not es_token_came_from_config():
+        return
+    config_path = os.environ.get('MYHAREM_CONF', '/etc/myharem.conf')
+    try:
+        mode = os.stat(config_path).st_mode
+    except OSError:
+        return
+    if mode & 0o077:
+        report.warn(
+            f"{config_path} holds es_token and is group/world-readable "
+            f"({oct(mode & 0o777)}). Run 'chmod 600 {config_path}', or set "
+            f"MYHAREM_ES_TOKEN in the environment instead."
+        )
+
+
+def get_es_bintar_target():
+    """Override for the Enterprise bintar target, e.g. 'rhel-9-x86_64'.
+
+    Resolution: MYHAREM_ES_BINTAR_TARGET env, then `es_bintar_target` in the
+    config file, then None — in which case it is detected from /etc/os-release.
+    Enterprise publishes one bintar per distro and it must match this host.
+    """
+    env_value = os.environ.get('MYHAREM_ES_BINTAR_TARGET')
+    if env_value:
+        return env_value
+    config = get_config()
+    return config.get('DEFAULT', 'es_bintar_target', fallback=None) or None
 
 
 def get_advertise_address():

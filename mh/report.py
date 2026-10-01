@@ -11,6 +11,8 @@ This lets an automation caller (e.g. the MSRS control plane) capture stdout as
 structured JSON and stderr as a log stream, while humans still see progress.
 """
 
+import re
+
 import click
 
 _json_mode = False
@@ -41,3 +43,18 @@ def warn(message: str) -> None:
 
 def error(message: str) -> None:
     click.secho(message, fg="red", bold=True, err=True)
+
+
+_URL_RE = re.compile(r'https?://\S+')
+
+
+def redact(text: str) -> str:
+    """Error text with any URL stripped out.
+
+    A MariaDB Enterprise download URL carries the customer token as a PATH
+    SEGMENT, so the URL is itself a secret: it must never reach a log line, an
+    exception message, or the process table. Applied to text that came from
+    somewhere else (an OSError, an HTTP library) where a URL can be embedded
+    without the caller knowing.
+    """
+    return _URL_RE.sub('<url redacted>', text)

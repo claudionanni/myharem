@@ -2,6 +2,49 @@
 
 All notable changes to MyHarem are documented here.
 
+## [0.5.0] - 2026-10-01
+
+### Added
+- **`mh download`** — picks a MariaDB tarball from the official download sites
+  and stages it in `local/`, interactively or by flag
+  (`--edition CS|ES`, `--version`, `--target`, `--list`, `--no-verify`).
+  Staging a tarball by hand was the last manual step: `mh deploy` refused with
+  "No tarballs found in local/" and no instruction on how to get one, while
+  `mh fetch-tarball` required a URL the user had to already hold.
+  - Community comes from the Foundation REST API, unauthenticated, and the
+    **published sha256 is verified before the file is renamed into place** — so
+    a corrupt download can never become a name the staged-file check (which is
+    by name only) would trust forever. It is also the first integrity check
+    anywhere in myharem, and it earns its keep: the API advertises an `http://`
+    URL that redirects to a third-party mirror.
+  - The build selected is always the `linux-systemd` flavour, i.e. the one that
+    bundles `libgalera_smm.so` — the first time the flavour table in the README
+    exists as code rather than prose.
+  - Enterprise comes from DLM and needs a customer token in `MYHAREM_ES_TOKEN`
+    or `es_token`. Enterprise publishes one bintar **per distribution**, so the
+    target is detected from `/etc/os-release` (`--target` overrides); a
+    mismatch is not a clean failure but a missing library at server start.
+  - Refusing without a token still lists the published Enterprise series — that
+    endpoint needs no token, so there was no reason to answer a question about
+    versions with nothing but "set a variable".
+- `mh --version` (0.4.1 shipped without one, so a bug report could not say which
+  build it came from). `setup.py` now reads `__version__` from the package.
+
+### Security
+- **An Enterprise download URL carries the customer token as a path segment, so
+  the URL is itself a secret.** `fetch_tarball` interpolated the URL into both
+  its progress line and its exception, which would have published the token the
+  first time an Enterprise download failed. The staging core is now
+  `stage_tarball(..., label=...)`, which names the file instead; `fetch_tarball`
+  passes the URL and so is byte-identical to before. Errors from the network
+  layer are run through the new `report.redact()`, since an SSL or proxy error
+  can embed the URL on its own. Downloads stay in-process (`urllib`) rather than
+  shelling out to curl, which would expose the token in the process table; there
+  is no `--token` flag; and the `--json` payload carries no URL for either
+  edition. Tests assert a token appears in no output on any failure path.
+- `mh download` warns when the config file holding `es_token` is group- or
+  world-readable, which is how `install.sh` installs it.
+
 ## [0.4.1] - 2026-08-12
 
 ### Fixed

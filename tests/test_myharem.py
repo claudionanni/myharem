@@ -6,6 +6,7 @@ structured results, manifest recording, and rollback — not a live server.
 """
 
 import getpass
+import hashlib
 import json
 import subprocess
 from pathlib import Path
@@ -15,7 +16,9 @@ import pytest
 from click.testing import CliRunner
 
 import mh
-from mh import config, deployment, galera, manifest, model, replication, service
+from mh import cli as cli_module
+from mh import (catalog, config, deployment, galera, manifest, model,
+                replication, report, service)
 from mh.cli import main
 
 
@@ -667,3 +670,394 @@ def test_setup_py_version_matches_the_package():
     setup_py = (Path(__file__).resolve().parent.parent / 'setup.py').read_text()
     assert "version=version," in setup_py
     assert not re.search(r"version=['\"]\d", setup_py)
+
+
+# --------------------------------------------------------------------------
+# mh download — catalog parsing, secret handling, staging, CLI
+# --------------------------------------------------------------------------
+
+CS_INDEX = json.dumps({
+    "major_releases": [
+        {"release_id": "13.2", "release_status": "Preview"},
+        {"release_id": "11.4", "release_status": "Stable",
+         "release_support_type": "Long Term Support",
+         "release_eol_date": "2029-05-29"},
+        {"release_id": "10.6", "release_status": "Stable"},
+    ]
+})
+
+CS_SERIES_11_4 = json.dumps({
+    "releases": {"11.4.9": {}, "11.4.13": {}, "11.4.10": {}}
+})
+
+CS_VERSION_11_4_13 = json.dumps({
+    "release_data": {
+        "11.4.13": {
+            "files": [
+                {"file_name": "mariadb-11.4.13.tar.gz",
+                 "package_type": "gzipped tar file", "os": "Source", "cpu": None,
+                 "checksum": {"sha256sum": "source-hash"},
+                 "file_download_url": "http://example.org/src.tar.gz"},
+                {"file_name": "mariadb-11.4.13-winx64.msi",
+                 "package_type": "MSI Package", "os": "Windows", "cpu": "x86_64",
+                 "checksum": {}, "file_download_url": "http://example.org/w.msi"},
+                {"file_name": "yum/", "package_type": None, "os": None,
+                 "cpu": None, "checksum": {}, "file_download_url": None},
+                {"file_name": "mariadb-11.4.13-linux-systemd-x86_64.tar.gz",
+                 "package_type": "gzipped tar file", "os": "Linux", "cpu": "x86_64",
+                 "checksum": {"sha256sum": "ABCDEF"},
+                 "file_download_url":
+                     "http://downloads.mariadb.org/x/mariadb-11.4.13-linux-systemd-x86_64.tar.gz"},
+            ]
+        }
+    }
+})
+
+ES_RELEASES_TEXT = "10.6.28-24 11.4.13-10 11.8.9-6 12.3.3-0"
+
+ES_SERIES_HTML = """
+<html><body>
+ <a href="/browse/TOK/mariadb_enterprise_server/11.4.13-10/">11.4.13-10</a>
+ <a href="/browse/TOK/mariadb_enterprise_server/11.4.9-6/">11.4.9-6</a>
+ <a href="/browse/TOK/mariadb_enterprise_server/11.4.12-9/">11.4.12-9</a>
+</body></html>
+"""
+
+ES_BINTAR_HTML = """
+<html><body>
+ <a href="https://dlm.mariadb.com/TOK/9911/es/mariadb-enterprise-11.4.13-10-ubuntu-2204-x86_64.tar.gz">other</a>
+ <a href="https://dlm.mariadb.com/TOK/9912/es/mariadb-enterprise-11.4.13-10-rhel-9-x86_64.tar.gz">this one</a>
+</body></html>
+"""
+
+
+def _canned_fetch(mapping):
+    """A catalog._fetch_url stand-in dispatching on a URL fragment."""
+    def fake(url, timeout=30):
+        for fragment, body in mapping.items():
+            if fragment in url:
+                return body
+        raise AssertionError(f"unexpected URL fetched: {url}")
+    return fake
+
+
+CS_ROUTES = {
+    "rest-api/mariadb/11.4/": CS_SERIES_11_4,
+    "rest-api/mariadb/11.4.13/": CS_VERSION_11_4_13,
+    "rest-api/mariadb/": CS_INDEX,
+}
+
+
+# ---- Community catalog ----
+
+def test_cs_series_puts_stable_before_preview(monkeypatch):
+    monkeypatch.setattr(catalog, '_fetch_url', _canned_fetch(CS_ROUTES))
+    series = catalog.list_cs_series()
+    assert [s.id for s in series] == ['11.4', '10.6', '13.2']
+    assert series[-1].status == 'Preview'
+
+
+def test_cs_releases_sort_numerically_not_lexically(monkeypatch):
+    monkeypatch.setattr(catalog, '_fetch_url', _canned_fetch(CS_ROUTES))
+    assert catalog.list_cs_releases('11.4') == ['11.4.13', '11.4.10', '11.4.9']
+
+
+def test_cs_file_selection_excludes_the_source_tarball(monkeypatch):
+    """The bug that would silently deploy a source tree instead of a bindist."""
+    monkeypatch.setattr(catalog, '_fetch_url', _canned_fetch(CS_ROUTES))
+    artifact = catalog.resolve_cs_artifact('11.4.13')
+    assert artifact.filename == 'mariadb-11.4.13-linux-systemd-x86_64.tar.gz'
+
+
+def test_cs_file_selection_prefers_linux_systemd_over_generic():
+    """linux-systemd is the flavour that bundles the Galera provider."""
+    files = [
+        {"file_name": "mariadb-11.4.13-linux-x86_64.tar.gz",
+         "package_type": "gzipped tar file", "os": "Linux", "cpu": "x86_64"},
+        {"file_name": "mariadb-11.4.13-linux-systemd-x86_64.tar.gz",
+         "package_type": "gzipped tar file", "os": "Linux", "cpu": "x86_64"},
+    ]
+    chosen = catalog._pick_cs_file(files, want_arch='x86_64')
+    assert chosen['file_name'] == 'mariadb-11.4.13-linux-systemd-x86_64.tar.gz'
+
+
+def test_cs_artifact_upgrades_http_to_https_and_takes_sha256(monkeypatch):
+    monkeypatch.setattr(catalog, '_fetch_url', _canned_fetch(CS_ROUTES))
+    artifact = catalog.resolve_cs_artifact('11.4.13')
+    assert artifact.url.startswith('https://')
+    assert artifact.sha256 == 'ABCDEF'
+
+
+def test_cs_version_resolution_takes_the_newest_in_a_series(monkeypatch):
+    monkeypatch.setattr(catalog, '_fetch_url', _canned_fetch(CS_ROUTES))
+    assert catalog.resolve_cs_version('11.4') == '11.4.13'
+    assert catalog.resolve_cs_version('11.4.10') == '11.4.10'
+
+
+# ---- Enterprise catalog ----
+
+def test_es_series_parses_whitespace_separated_text(monkeypatch):
+    monkeypatch.setattr(catalog, '_fetch_url',
+                        _canned_fetch({"rest/releases": ES_RELEASES_TEXT}))
+    assert catalog.list_es_series() == ['12.3', '11.8', '11.4', '10.6']
+
+
+def test_es_release_listing_is_scraped_and_sorted(monkeypatch):
+    monkeypatch.setattr(catalog, '_fetch_url',
+                        _canned_fetch({"/browse/": ES_SERIES_HTML}))
+    assert catalog.list_es_releases('11.4', 'TOK') == [
+        '11.4.13-10', '11.4.12-9', '11.4.9-6']
+
+
+def test_es_build_suffix_sorts_numerically():
+    """A string sort would put 11.4.9-6 above 11.4.12-9."""
+    assert catalog.sort_releases_desc(['11.4.9-6', '11.4.12-9'])[0] == '11.4.12-9'
+
+
+def test_es_partial_version_resolves_to_the_newest_build(monkeypatch):
+    monkeypatch.setattr(catalog, '_fetch_url',
+                        _canned_fetch({"/browse/": ES_SERIES_HTML}))
+    assert catalog.resolve_es_version('11.4', 'TOK') == '11.4.13-10'
+    assert catalog.resolve_es_version('11.4.12', 'TOK') == '11.4.12-9'
+    assert catalog.resolve_es_version('11.4.12-9', 'TOK') == '11.4.12-9'
+
+
+def test_es_artifact_ignores_a_decoy_for_another_target(monkeypatch):
+    monkeypatch.setattr(catalog, '_fetch_url',
+                        _canned_fetch({"/bintar/": ES_BINTAR_HTML}))
+    artifact = catalog.resolve_es_artifact('11.4.13-10', 'rhel-9-x86_64', 'TOK')
+    assert artifact.filename.endswith('rhel-9-x86_64.tar.gz')
+    assert '9912' in artifact.url
+    assert artifact.sha256 is None
+
+
+def test_es_missing_artifact_names_the_release_and_target(monkeypatch):
+    monkeypatch.setattr(catalog, '_fetch_url',
+                        _canned_fetch({"/bintar/": "<html></html>"}))
+    with pytest.raises(click.ClickException) as excinfo:
+        catalog.resolve_es_artifact('11.4.13-10', 'debian-12-x86_64', 'TOK')
+    assert 'debian-12-x86_64' in str(excinfo.value)
+    assert 'listing format may have changed' in str(excinfo.value)
+
+
+# ---- secrets ----
+
+def test_report_redact_strips_urls():
+    assert 'SEKRET' not in report.redact(
+        'boom https://dlm.mariadb.com/browse/SEKRET/x refused')
+
+
+def test_es_failure_never_leaks_the_tokenised_url(monkeypatch):
+    def exploding(url, timeout=30):
+        raise OSError(
+            "connection reset for "
+            "https://dlm.mariadb.com/browse/SEKRET-TOKEN/mariadb_enterprise_server/")
+    monkeypatch.setattr(catalog, '_fetch_url', exploding)
+    with pytest.raises(click.ClickException) as excinfo:
+        catalog.list_es_releases('11.4', 'SEKRET-TOKEN')
+    assert 'SEKRET-TOKEN' not in str(excinfo.value)
+    assert 'dlm.mariadb.com' not in str(excinfo.value)
+
+
+def test_download_command_never_prints_the_token(basedir, monkeypatch):
+    def exploding(url, timeout=30):
+        raise OSError(
+            "refused: https://dlm.mariadb.com/browse/SEKRET-TOKEN/x/")
+    monkeypatch.setattr(catalog, '_fetch_url', exploding)
+    monkeypatch.setenv('MYHAREM_ES_TOKEN', 'SEKRET-TOKEN')
+    monkeypatch.setenv('MYHAREM_ES_BINTAR_TARGET', 'rhel-9-x86_64')
+    result = CliRunner().invoke(main, ['download', '-e', 'ES', '-v', '11.4'])
+    assert result.exit_code != 0
+    assert 'SEKRET' not in result.output
+    assert 'SEKRET' not in str(result.exception)
+
+
+def test_es_refuses_before_any_network_when_no_token(basedir, monkeypatch):
+    def must_not_be_called(url, timeout=30):
+        raise AssertionError("no network before the token is checked")
+    monkeypatch.delenv('MYHAREM_ES_TOKEN', raising=False)
+    # list_es_series is allowed to fail; the refusal must still name the variable
+    monkeypatch.setattr(catalog, '_fetch_url', must_not_be_called)
+    result = CliRunner().invoke(main, ['download', '-e', 'ES', '-v', '11.4'])
+    assert result.exit_code != 0
+    assert 'MYHAREM_ES_TOKEN' in result.output
+
+
+def test_download_has_no_token_flag():
+    """A --token flag would put the secret in shell history and in `ps`."""
+    result = CliRunner().invoke(main, ['download', '--help'])
+    assert '--token' not in result.output
+
+
+def test_world_readable_config_holding_the_token_warns(tmp_path, monkeypatch):
+    conf = tmp_path / 'myharem.conf'
+    conf.write_text("[DEFAULT]\nes_token=SEKRET\n")
+    conf.chmod(0o644)
+    monkeypatch.setenv('MYHAREM_CONF', str(conf))
+    monkeypatch.delenv('MYHAREM_ES_TOKEN', raising=False)
+    warnings = []
+    monkeypatch.setattr(report, 'warn', warnings.append)
+    config.warn_if_config_is_world_readable()
+    assert warnings and 'chmod 600' in warnings[0]
+    assert 'SEKRET' not in warnings[0]
+
+
+# ---- staging + checksum ----
+
+def test_stage_tarball_verifies_a_matching_sha256(basedir, monkeypatch):
+    payload = b'fake-tarball-bytes'
+    monkeypatch.setattr(deployment, '_download',
+                        lambda url, dest, timeout=300: Path(dest).write_bytes(payload))
+    dest = deployment.stage_tarball(
+        'https://example.org/x.tar.gz', 'x.tar.gz',
+        sha256=hashlib.sha256(payload).hexdigest())
+    assert dest.read_bytes() == payload
+
+
+def test_stage_tarball_discards_a_checksum_mismatch(basedir, monkeypatch):
+    monkeypatch.setattr(deployment, '_download',
+                        lambda url, dest, timeout=300: Path(dest).write_bytes(b'x'))
+    with pytest.raises(click.ClickException, match='Checksum mismatch'):
+        deployment.stage_tarball('https://example.org/x.tar.gz', 'x.tar.gz',
+                                 sha256='0' * 64)
+    assert not (basedir / 'local' / 'x.tar.gz').exists()
+    assert not (basedir / 'local' / 'x.tar.gz.part').exists()
+
+
+def test_stage_tarball_errors_name_the_label_not_the_url(basedir, monkeypatch):
+    def failing(url, dest, timeout=300):
+        raise OSError("refused by https://dlm.mariadb.com/browse/SEKRET/x")
+    monkeypatch.setattr(deployment, '_download', failing)
+    with pytest.raises(click.ClickException) as excinfo:
+        deployment.stage_tarball('https://dlm.mariadb.com/browse/SEKRET/x',
+                                 'es.tar.gz', label='es.tar.gz')
+    assert 'SEKRET' not in str(excinfo.value)
+    assert 'es.tar.gz' in str(excinfo.value)
+
+
+def test_stage_tarball_rejects_a_staged_file_with_the_wrong_checksum(basedir):
+    local = basedir / 'local'
+    local.mkdir(parents=True, exist_ok=True)
+    (local / 'x.tar.gz').write_bytes(b'truncated')
+    with pytest.raises(click.ClickException, match='already staged'):
+        deployment.stage_tarball('https://example.org/x.tar.gz', 'x.tar.gz',
+                                 sha256='0' * 64)
+
+
+# ---- bintar target detection ----
+
+def test_dlm_target_maps_the_rhel_family_by_major():
+    assert catalog.dlm_target_from_os_release(
+        'ID=rocky\nVERSION_ID="9.4"\n', 'x86_64') == 'rhel-9-x86_64'
+    assert catalog.dlm_target_from_os_release(
+        'ID=rhel\nVERSION_ID="8.10"\n', 'aarch64') == 'rhel-8-aarch64'
+
+
+def test_dlm_target_compacts_the_ubuntu_version():
+    assert catalog.dlm_target_from_os_release(
+        'ID=ubuntu\nVERSION_ID="22.04"\n', 'x86_64') == 'ubuntu-2204-x86_64'
+
+
+def test_dlm_target_is_none_for_an_unmapped_distro():
+    assert catalog.dlm_target_from_os_release(
+        'ID=fedora\nVERSION_ID=42\n', 'x86_64') is None
+
+
+def test_es_target_resolution_prefers_flag_then_config(tmp_path):
+    os_release = tmp_path / 'os-release'
+    os_release.write_text('ID=rocky\nVERSION_ID="9.4"\n')
+    assert catalog.resolve_es_target(
+        explicit='ubuntu-2204-x86_64', configured='debian-12-x86_64',
+        os_release=str(os_release))[0] == 'ubuntu-2204-x86_64'
+    assert catalog.resolve_es_target(
+        configured='debian-12-x86_64', os_release=str(os_release))[0] == 'debian-12-x86_64'
+    assert catalog.resolve_es_target(os_release=str(os_release)) == (
+        'rhel-9-x86_64', 'detected')
+
+
+def test_es_target_refusal_names_the_flag_and_known_targets(tmp_path):
+    os_release = tmp_path / 'os-release'
+    os_release.write_text('ID=fedora\nVERSION_ID=42\n')
+    with pytest.raises(click.ClickException) as excinfo:
+        catalog.resolve_es_target(os_release=str(os_release))
+    assert '--target' in str(excinfo.value)
+    assert 'rhel-9-x86_64' in str(excinfo.value)
+
+
+# ---- CLI ----
+
+def test_download_requires_flags_when_there_is_no_terminal(basedir):
+    result = CliRunner().invoke(main, ['download'])
+    assert result.exit_code == 2
+    assert '--edition' in result.output
+
+
+def test_download_json_mode_never_prompts(basedir):
+    result = CliRunner().invoke(main, ['--json', 'download'])
+    assert result.exit_code == 2
+
+
+def test_download_rejects_target_for_community(basedir):
+    result = CliRunner().invoke(
+        main, ['download', '-e', 'CS', '-v', '11.4', '--target', 'rhel-9-x86_64'])
+    assert result.exit_code == 2
+    assert 'Enterprise only' in result.output
+
+
+def test_download_non_interactive_stages_a_community_tarball(basedir, monkeypatch):
+    monkeypatch.setattr(catalog, '_fetch_url', _canned_fetch(CS_ROUTES))
+    monkeypatch.setattr(deployment, '_download',
+                        lambda url, dest, timeout=300: Path(dest).write_bytes(b'tar'))
+    result = CliRunner().invoke(
+        main, ['--json', 'download', '-e', 'CS', '-v', '11.4', '--no-verify'])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload['filename'] == 'mariadb-11.4.13-linux-systemd-x86_64.tar.gz'
+    assert payload['verified'] is False
+    assert 'url' not in payload
+
+
+def test_download_wizard_walks_edition_series_release(basedir, monkeypatch):
+    monkeypatch.setattr(catalog, '_fetch_url', _canned_fetch(CS_ROUTES))
+    monkeypatch.setattr(deployment, '_download',
+                        lambda url, dest, timeout=300: Path(dest).write_bytes(b'tar'))
+    monkeypatch.setattr(cli_module, '_stdin_is_tty', lambda: True)
+    result = CliRunner().invoke(main, ['download', '--no-verify'],
+                                input="1\n1\n1\ny\n")
+    assert result.exit_code == 0, result.output
+    assert '→ 11.4' in result.output
+    assert '→ 11.4.13' in result.output
+    assert (basedir / 'local' /
+            'mariadb-11.4.13-linux-systemd-x86_64.tar.gz').exists()
+
+
+def test_download_wizard_aborts_without_downloading(basedir, monkeypatch):
+    monkeypatch.setattr(catalog, '_fetch_url', _canned_fetch(CS_ROUTES))
+    monkeypatch.setattr(deployment, '_download', _never_download)
+    monkeypatch.setattr(cli_module, '_stdin_is_tty', lambda: True)
+    result = CliRunner().invoke(main, ['download'], input="1\n1\n1\nn\n")
+    assert result.exit_code == 0
+    assert 'Aborted.' in result.output
+
+
+def _never_download(url, dest, timeout=300):
+    raise AssertionError("should not download")
+
+
+def test_download_list_emits_json(basedir, monkeypatch):
+    monkeypatch.setattr(catalog, '_fetch_url', _canned_fetch(CS_ROUTES))
+    result = CliRunner().invoke(main, ['--json', 'download', '--list', '-e', 'CS'])
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)['series'][0]['id'] == '11.4'
+
+
+def test_download_is_idempotent_when_already_staged(basedir, monkeypatch):
+    monkeypatch.setattr(catalog, '_fetch_url', _canned_fetch(CS_ROUTES))
+    local = basedir / 'local'
+    local.mkdir(parents=True, exist_ok=True)
+    (local / 'mariadb-11.4.13-linux-systemd-x86_64.tar.gz').write_bytes(b'tar')
+    monkeypatch.setattr(deployment, '_download', _never_download)
+    result = CliRunner().invoke(
+        main, ['--json', 'download', '-e', 'CS', '-v', '11.4.13', '--no-verify'])
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)['already_staged'] is True

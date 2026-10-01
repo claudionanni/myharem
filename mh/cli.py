@@ -1,9 +1,11 @@
 import json
 import os
+import sys
 
 import click
 
 from . import __version__
+from . import catalog
 from . import config
 from . import deployment
 from . import galera
@@ -72,6 +74,258 @@ def fetch_tarball_command(ctx, url, filename):
     """Downloads a tarball into <basedir>/local/ (skipped if already staged)."""
     dest = deployment.fetch_tarball(url, filename=filename)
     _emit_action(ctx, {'path': str(dest)}, f"Tarball staged at {dest}")
+
+
+# ---------- download ----------
+
+def _stdin_is_tty():
+    """Indirection so the interactive tests can pretend to be a terminal.
+
+    CliRunner's stdin always reports isatty() False, which is also exactly what
+    a piped or cron invocation looks like — so the guard below is right for both
+    and the wizard test patches this one symbol.
+    """
+    return sys.stdin.isatty()
+
+
+def _es_token_or_refuse():
+    """The Enterprise token, or a refusal that is actually useful.
+
+    Checked before any network call, and the refusal still lists what exists:
+    the Enterprise release list needs no token, so there is no reason to answer
+    a question about versions with nothing but 'set a variable'.
+    """
+    token = config.get_es_token()
+    if token:
+        config.warn_if_config_is_world_readable()
+        return token
+
+    lines = [
+        "MariaDB Enterprise downloads need a customer token.",
+        "Set MYHAREM_ES_TOKEN, or add `es_token=...` to the myharem config",
+        "(chmod 600 it — the token is a secret).",
+    ]
+    try:
+        series = catalog.list_es_series()
+        lines.append(f"Enterprise series currently published: {', '.join(series)}")
+    except click.ClickException:
+        pass
+    lines.append("Community downloads need no token:")
+    lines.append("  mh download --edition CS --version 11.4")
+    raise click.ClickException("\n".join(lines))
+
+
+def _resolve_download(edition, version, target):
+    """(artifact, summary rows) for a fully specified request."""
+    if edition == 'CS':
+        release = catalog.resolve_cs_version(version)
+        artifact = catalog.resolve_cs_artifact(release)
+        rows = [
+            ("Edition", "Community Server"),
+            ("Version", release),
+            ("File", artifact.filename),
+            ("Verify", "sha256 (published)" if artifact.sha256 else "none published"),
+        ]
+        return artifact, rows
+
+    token = _es_token_or_refuse()
+    resolved_target, how = catalog.resolve_es_target(
+        explicit=target, configured=config.get_es_bintar_target()
+    )
+    release = catalog.resolve_es_version(version, token)
+    artifact = catalog.resolve_es_artifact(release, resolved_target, token)
+    rows = [
+        ("Edition", "Enterprise Server"),
+        ("Version", release),
+        ("Target", f"{resolved_target} ({how})"),
+        ("File", artifact.filename),
+        ("Verify", "none (Enterprise publishes no checksum)"),
+    ]
+    return artifact, rows
+
+
+def _stage(ctx, artifact, verify):
+    """Downloads an artifact, keeping a secret URL out of every message."""
+    dest = config.get_basedir() / 'local' / artifact.filename
+    already = dest.exists()
+    if artifact.edition == 'ES' and verify:
+        report.warn("Enterprise listings publish no checksum — skipping verification.")
+    path = deployment.stage_tarball(
+        artifact.url,
+        artifact.filename,
+        # The label, not the URL: an Enterprise URL carries the customer token.
+        label=artifact.filename,
+        sha256=artifact.sha256,
+        verify=verify,
+        timeout=1800,
+    )
+    _emit_action(
+        ctx,
+        # Deliberately no 'url' key, for either edition — so no future Enterprise
+        # branch can inherit one by forgetting to remove it.
+        {
+            'path': str(path),
+            'filename': artifact.filename,
+            'edition': artifact.edition,
+            'version': artifact.version,
+            'verified': bool(artifact.sha256 and verify),
+            'already_staged': already,
+        },
+        f"Tarball staged at {path}",
+    )
+
+
+@main.command()
+@click.option('--edition', '-e', 'edition', default=None,
+              help="CS (Community) or ES (Enterprise). Omit for the wizard.")
+@click.option('--version', '-v', 'version', default=None,
+              help="A series (11.4 — newest release in it) or an exact version "
+                   "(11.4.13, or an Enterprise build 11.4.13-10). Omit for the "
+                   "wizard. Note: `mh --version` prints myharem's own version.")
+@click.option('--target', default=None,
+              help="Enterprise bintar target, e.g. rhel-9-x86_64. Defaults to "
+                   "the one detected from /etc/os-release.")
+@click.option('--list', 'list_only', is_flag=True,
+              help="List what is published and exit.")
+@click.option('--no-verify', 'verify', flag_value=False, default=True,
+              help="Skip the published sha256 check (Community).")
+@click.pass_context
+def download(ctx, edition, version, target, list_only, verify):
+    """Downloads a MariaDB tarball into <basedir>/local/ (interactive if no args).
+
+    Community comes from downloads.mariadb.org and needs no credentials.
+    Enterprise comes from dlm.mariadb.com and needs a customer token in
+    MYHAREM_ES_TOKEN or `es_token` in the config file.
+    """
+    edition = _normalise_edition(edition)
+    if target and edition == 'CS':
+        raise click.UsageError(
+            "--target applies to Enterprise only: a Community tarball is built "
+            "per CPU architecture, not per distribution."
+        )
+
+    if list_only:
+        _list_catalog(ctx, edition, version)
+        return
+
+    if not edition or not version:
+        if ctx.obj.get('json') or not _stdin_is_tty():
+            raise click.UsageError(
+                "mh download needs --edition and --version when there is no "
+                "terminal to prompt on (piped stdin, cron, or --json).\n"
+                "Example: mh download --edition CS --version 11.4.13"
+            )
+        _download_wizard(ctx, edition, target, verify)
+        return
+
+    artifact, rows = _resolve_download(edition, version, target)
+    _stage(ctx, artifact, verify)
+
+
+def _normalise_edition(value):
+    if value is None:
+        return None
+    normalised = value.strip().upper()
+    aliases = {'COMMUNITY': 'CS', 'CS': 'CS', 'ENTERPRISE': 'ES', 'ES': 'ES'}
+    if normalised not in aliases:
+        raise click.UsageError(
+            f"Unknown edition '{value}'. Use CS (Community) or ES (Enterprise)."
+        )
+    return aliases[normalised]
+
+
+def _list_catalog(ctx, edition, version):
+    """--list: what is published, for a human or for a pipeline."""
+    if not edition:
+        raise click.UsageError("--list needs --edition CS or --edition ES.")
+
+    if edition == 'CS':
+        if version:
+            releases = catalog.list_cs_releases(version)
+            payload = {'edition': 'CS', 'series': version, 'releases': releases}
+            human = "\n".join(f"  {r}" for r in releases)
+        else:
+            series = catalog.list_cs_series()
+            payload = {'edition': 'CS',
+                       'series': [{'id': s.id, 'status': s.status} for s in series]}
+            human = "\n".join(f"  {s.id:<8} {s.label()}" for s in series)
+    else:
+        if version:
+            token = _es_token_or_refuse()
+            releases = catalog.list_es_releases(version, token)
+            payload = {'edition': 'ES', 'series': version, 'releases': releases}
+            human = "\n".join(f"  {r}" for r in releases)
+        else:
+            series = catalog.list_es_series()
+            payload = {'edition': 'ES', 'series': series}
+            human = "\n".join(f"  {s}" for s in series)
+    _emit_action(ctx, payload, human)
+
+
+def _download_wizard(ctx, edition, target, verify):
+    """Interactive download: pick edition, series, release, confirm."""
+    if not edition:
+        click.echo("\nEdition:")
+        click.echo("  [1] Community Server  (downloads.mariadb.org)")
+        click.echo("  [2] Enterprise Server (dlm.mariadb.com, token required)")
+        choice = click.prompt("\nSelect edition", type=click.IntRange(1, 2),
+                              default=1)
+        edition = 'CS' if choice == 1 else 'ES'
+    click.echo(f"  → {'Community Server' if edition == 'CS' else 'Enterprise Server'}")
+
+    if edition == 'ES':
+        # Before any listing, so a missing token is one clear message rather
+        # than a menu the user cannot act on.
+        _es_token_or_refuse()
+
+    if edition == 'CS':
+        report.log("Fetching the MariaDB release list ...")
+        series_list = catalog.list_cs_series()
+        click.echo("\nSeries:")
+        for i, s in enumerate(series_list, 1):
+            click.echo(f"  [{i}] {s.id:<8} {s.label()}")
+        choice = click.prompt("\nSelect series", type=click.IntRange(1, len(series_list)))
+        series = series_list[choice - 1].id
+    else:
+        report.log("Fetching the MariaDB Enterprise release list ...")
+        series_list = catalog.list_es_series()
+        click.echo("\nSeries:")
+        for i, sid in enumerate(series_list, 1):
+            click.echo(f"  [{i}] {sid}")
+        choice = click.prompt("\nSelect series", type=click.IntRange(1, len(series_list)))
+        series = series_list[choice - 1]
+    click.echo(f"  → {series}")
+
+    report.log(f"Fetching the {series} releases ...")
+    if edition == 'CS':
+        releases = catalog.list_cs_releases(series)
+    else:
+        releases = catalog.list_es_releases(series, config.get_es_token())
+
+    shown = releases[:10]
+    click.echo(f"\nReleases in {series}:")
+    for i, release in enumerate(shown, 1):
+        click.echo(f"  [{i}] {release}")
+    choice = click.prompt("\nSelect release", type=click.IntRange(1, len(shown)),
+                          default=1)
+    release = shown[choice - 1]
+    click.echo(f"  → {release}")
+
+    artifact, rows = _resolve_download(edition, release, target)
+
+    dest = config.get_basedir() / 'local' / artifact.filename
+    click.echo("")
+    for key, value in rows:
+        click.echo(f"  {key + ':':<9} {value}")
+    if dest.exists():
+        click.echo(f"  {'Dest:':<9} {dest} (already staged — nothing to download)")
+    else:
+        click.echo(f"  {'Dest:':<9} {dest}")
+
+    if not click.confirm("\nProceed?", default=True):
+        click.echo("Aborted.")
+        return
+    _stage(ctx, artifact, verify)
 
 
 def _deploy_wizard(ctx):
