@@ -3,6 +3,7 @@ import os
 
 import click
 
+from . import __version__
 from . import config
 from . import deployment
 from . import galera
@@ -13,6 +14,7 @@ from .instance import Instance
 
 
 @click.group()
+@click.version_option(version=__version__, prog_name='myharem')
 @click.option('--json', 'json_out', is_flag=True,
               help='Emit machine-readable JSON results on stdout.')
 @click.pass_context

@@ -14,6 +14,7 @@ import click
 import pytest
 from click.testing import CliRunner
 
+import mh
 from mh import config, deployment, galera, manifest, model, replication, service
 from mh.cli import main
 
@@ -644,3 +645,25 @@ def test_credential_defaults(monkeypatch):
     monkeypatch.setenv("MYHAREM_CONF", "/nonexistent/myharem.conf")
     assert config.get_admin_password() == ""
     assert config.get_sst_password() == "sstpwd"
+
+
+def test_version_flag_reports_the_package_version():
+    runner = CliRunner()
+    result = runner.invoke(main, ['--version'])
+    assert result.exit_code == 0
+    assert mh.__version__ in result.output
+
+
+def test_setup_py_version_matches_the_package():
+    """setup.py reads __version__ rather than carrying a copy.
+
+    A release that bumps one and not the other ships a wheel whose metadata
+    disagrees with what `mh --version` prints — which is precisely the question
+    the flag exists to answer.
+    """
+    import re
+    from pathlib import Path
+
+    setup_py = (Path(__file__).resolve().parent.parent / 'setup.py').read_text()
+    assert "version=version," in setup_py
+    assert not re.search(r"version=['\"]\d", setup_py)

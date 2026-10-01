@@ -1,13 +1,23 @@
+import re
 from pathlib import Path
 
 from setuptools import find_packages, setup
+
+here = Path(__file__).parent
+
+# Read rather than import: importing mh would need click at build time.
+version = re.search(
+    r"^__version__ = ['\"]([^'\"]+)['\"]",
+    (here / "mh" / "__init__.py").read_text(encoding="utf-8"),
+    re.M,
+).group(1)
 
 readme = Path(__file__).parent / "README.md"
 long_description = readme.read_text(encoding="utf-8") if readme.exists() else ""
 
 setup(
     name='myharem',
-    version='0.4.1',
+    version=version,
     description=(
         'Deploy and manage multiple MariaDB instances (single, async '
         'replication, Galera) from tarballs on a single host.'
