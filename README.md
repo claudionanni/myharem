@@ -110,9 +110,22 @@ provider — so a downloaded tarball never hits the problem described under
 **Enterprise** comes from `dlm.mariadb.com` and needs a customer token:
 
 ```bash
-export MYHAREM_ES_TOKEN=...            # or es_token= in myharem.conf (chmod 600)
-sudo mh download --edition ES --version 11.4
+export MYHAREM_ES_TOKEN=...
+sudo -E mh download --edition ES --version 11.4     # -E: see below
 ```
+
+**`sudo` resets the environment**, so plain `sudo mh download` does not see
+`MYHAREM_ES_TOKEN` and refuses as if it were never set. Either pass `-E`, or add
+`Defaults env_keep += "MYHAREM_ES_TOKEN"` to sudoers, or keep the token in the
+config file instead:
+
+```bash
+printf 'es_token=...\n' | sudo tee -a /etc/myharem.conf > /dev/null
+sudo chmod 600 /etc/myharem.conf        # it is installed world-readable
+```
+
+Do **not** write it as `sudo MYHAREM_ES_TOKEN=... mh download`: that puts the
+token in your shell history and in `ps`, which is the whole thing this avoids.
 
 Without it the command refuses (it still lists the published Enterprise series,
 so you can see what you are missing). Enterprise publishes **one tarball per

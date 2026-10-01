@@ -105,6 +105,15 @@ def _es_token_or_refuse():
         "Set MYHAREM_ES_TOKEN, or add `es_token=...` to the myharem config",
         "(chmod 600 it — the token is a secret).",
     ]
+    if os.environ.get('SUDO_USER'):
+        # The likeliest reason the variable "is set" and we still cannot see it:
+        # sudo resets the environment, so `export ...; sudo mh download` loses
+        # it and fails exactly as if it had never been set.
+        lines.append(
+            "Running under sudo, which resets the environment — if you exported "
+            "MYHAREM_ES_TOKEN, re-run with 'sudo -E', or put es_token in the "
+            "config file."
+        )
     try:
         series = catalog.list_es_series()
         lines.append(f"Enterprise series currently published: {', '.join(series)}")

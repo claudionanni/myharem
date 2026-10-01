@@ -1061,3 +1061,14 @@ def test_download_is_idempotent_when_already_staged(basedir, monkeypatch):
         main, ['--json', 'download', '-e', 'CS', '-v', '11.4.13', '--no-verify'])
     assert result.exit_code == 0, result.output
     assert json.loads(result.stdout)['already_staged'] is True
+
+
+def test_es_refusal_mentions_sudo_dash_e_when_under_sudo(basedir, monkeypatch):
+    """`export VAR=...; sudo mh download` loses the variable — say so."""
+    monkeypatch.delenv('MYHAREM_ES_TOKEN', raising=False)
+    monkeypatch.setenv('SUDO_USER', 'claudio')
+    monkeypatch.setattr(catalog, '_fetch_url',
+                        _canned_fetch({"rest/releases": ES_RELEASES_TEXT}))
+    result = CliRunner().invoke(main, ['download', '-e', 'ES', '-v', '11.4'])
+    assert result.exit_code != 0
+    assert 'sudo -E' in result.output
