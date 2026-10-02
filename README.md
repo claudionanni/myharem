@@ -102,8 +102,11 @@ deploy command looks for it.
   Enterprise build `11.4.13-10`) takes exactly that one.
 - `mh download --list --edition CS [--version <series>]` — what is published,
   without downloading anything. Honours `--json`.
-- `mh download ... --target <bintar>` — Enterprise only; overrides the
-  per-distribution tarball detected for this host.
+- `mh download ... --target <bintar>` — Enterprise only; which distribution the
+  tarball is for. The wizard asks, defaulting to this host; detection is a
+  default, not a restriction, because the tarball is usually for other machines.
+- `mh download ... --arch <arch>` — Community architecture (default: this
+  machine's). For Enterprise the architecture is part of `--target`.
 - `mh download ... --no-verify` — skip the published sha256 check.
 - `mh fetch-tarball <url> [--name FILENAME]` — download from a URL you already
   have, for anything the catalogue does not cover.
@@ -134,8 +137,10 @@ Enterprise comes from `dlm.mariadb.com` and needs a customer token — run
 MariaDB ID login), or to check whether one is already set. Without a token
 the command refuses, though it still lists the published Enterprise series so
 you can see what you are missing. Enterprise publishes **one tarball per
-distribution**, not just per architecture, so the right one for this host is
-detected from `/etc/os-release` and `--target rhel-9-x86_64` overrides it.
+distribution**, not just per architecture. The wizard asks which one, defaulting
+to this host when it recognises it; `--target rhel-9-x86_64` sets it directly.
+Detection is only a default — you are usually downloading on one machine for
+nodes that run somewhere else.
 
 ```bash
 export MYHAREM_ES_TOKEN=...

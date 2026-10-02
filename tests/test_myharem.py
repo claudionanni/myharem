@@ -1205,3 +1205,52 @@ def test_token_json_carries_no_token_and_does_not_open(basedir, monkeypatch):
     assert payload['source'] == 'env'
     assert not opened
     assert 'SEKRET' not in result.output
+
+
+ES_ROUTES = {
+    "/bintar/": ES_BINTAR_HTML,     # before /browse/ — both share that prefix
+    "/browse/": ES_SERIES_HTML,
+    "rest/releases": ES_RELEASES_TEXT,
+}
+
+
+def test_es_wizard_asks_for_the_target_when_this_host_is_not_one(basedir, monkeypatch):
+    """A laptop staging a tarball for a repro host must not be refused."""
+    monkeypatch.setenv('MYHAREM_ES_TOKEN', 'TOK')
+    monkeypatch.delenv('MYHAREM_ES_BINTAR_TARGET', raising=False)
+    monkeypatch.setattr(catalog, '_fetch_url', _canned_fetch(ES_ROUTES))
+    monkeypatch.setattr(catalog, 'detect_dlm_target', lambda path='/etc/os-release': None)
+    monkeypatch.setattr(deployment, '_download',
+                        lambda url, dest, timeout=300: Path(dest).write_bytes(b'tar'))
+    monkeypatch.setattr(cli_module, '_stdin_is_tty', lambda: True)
+    # edition 2, series 3 (11.4), release 1, distro 2 (rhel-9), arch 1, confirm
+    result = CliRunner().invoke(main, ['download'], input="2\n3\n1\n2\n1\ny\n")
+    assert result.exit_code == 0, result.output
+    assert '→ rhel-9-x86_64' in result.output
+    assert (basedir / 'local' /
+            'mariadb-enterprise-11.4.13-10-rhel-9-x86_64.tar.gz').exists()
+
+
+def test_es_wizard_defaults_to_the_detected_target(basedir, monkeypatch):
+    monkeypatch.setenv('MYHAREM_ES_TOKEN', 'TOK')
+    monkeypatch.delenv('MYHAREM_ES_BINTAR_TARGET', raising=False)
+    monkeypatch.setattr(catalog, '_fetch_url', _canned_fetch(ES_ROUTES))
+    monkeypatch.setattr(catalog, 'detect_dlm_target',
+                        lambda path='/etc/os-release': 'rhel-9-x86_64')
+    monkeypatch.setattr(deployment, '_download',
+                        lambda url, dest, timeout=300: Path(dest).write_bytes(b'tar'))
+    monkeypatch.setattr(cli_module, '_stdin_is_tty', lambda: True)
+    # blank distro and arch answers take the defaults
+    result = CliRunner().invoke(main, ['download'], input="2\n3\n1\n\n\ny\n")
+    assert result.exit_code == 0, result.output
+    assert '(this host)' in result.output
+    assert '→ rhel-9-x86_64' in result.output
+
+
+def test_community_arch_can_differ_from_this_machine(basedir, monkeypatch):
+    """--arch exists for the same reason: the tarball is not for this box."""
+    monkeypatch.setattr(catalog, '_fetch_url', _canned_fetch(CS_ROUTES))
+    result = CliRunner().invoke(
+        main, ['--json', 'download', '-e', 'CS', '-v', '11.4.13', '--arch', 'aarch64'])
+    assert result.exit_code != 0
+    assert 'aarch64' in result.output

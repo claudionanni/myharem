@@ -364,11 +364,19 @@ def resolve_es_artifact(release, target, token):
 
 _RHEL_FAMILY = {'rhel', 'centos', 'rocky', 'almalinux', 'ol', 'oraclelinux'}
 
+# Every bintar DLM publishes, as data rather than prose: the wizard offers these
+# as a menu, because the tarball is for the nodes being built, which need not be
+# the machine running `mh` (an engineer stages one on a laptop all the time).
+ES_TARGET_DISTROS = (
+    'rhel-8', 'rhel-9', 'rhel-10',
+    'ubuntu-2004', 'ubuntu-2204', 'ubuntu-2404',
+    'debian-11', 'debian-12', 'sles-15',
+)
+ES_ARCHES = ('x86_64', 'aarch64')
+
 KNOWN_TARGETS = (
-    'rhel-8-x86_64, rhel-9-x86_64, rhel-10-x86_64, '
-    'ubuntu-2004-x86_64, ubuntu-2204-x86_64, ubuntu-2404-x86_64, '
-    'debian-11-x86_64, debian-12-x86_64, sles-15-x86_64 '
-    '(and the matching -aarch64 variants)'
+    ', '.join(f'{distro}-x86_64' for distro in ES_TARGET_DISTROS)
+    + ' (and the matching -aarch64 variants)'
 )
 
 
@@ -429,10 +437,11 @@ def detect_dlm_target(path='/etc/os-release'):
     return dlm_target_from_os_release(text)
 
 
-def resolve_es_target(explicit=None, configured=None, os_release='/etc/os-release'):
+def resolve_es_target(explicit=None, configured=None, os_release='/etc/os-release',
+                      explicit_note='from --target'):
     """--target, then env/config, then detection, then a refusal that helps."""
     if explicit:
-        return explicit, 'from --target'
+        return explicit, explicit_note
     if configured:
         return configured, 'from config'
     detected = detect_dlm_target(os_release)
@@ -451,6 +460,7 @@ def resolve_es_target(explicit=None, configured=None, os_release='/etc/os-releas
         f"Enterprise ships one tarball per distro and it must match the host. "
         f"Pick one explicitly:\n"
         f"  mh download --edition ES --version 11.4 --target rhel-9-{arch()}\n"
+        f"(or run `mh download` with no arguments — the wizard asks.)\n"
         f"Known targets: {KNOWN_TARGETS}\n"
         f"(or set es_bintar_target in myharem.conf / MYHAREM_ES_BINTAR_TARGET)"
     )

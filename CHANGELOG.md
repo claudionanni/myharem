@@ -20,6 +20,12 @@ All notable changes to MyHarem are documented here.
   - The build selected is always the `linux-systemd` flavour, i.e. the one that
     bundles `libgalera_smm.so` — the first time the flavour table in the README
     exists as code rather than prose.
+  - The wizard **asks** which distribution an Enterprise tarball is for,
+    defaulting to this host when it recognises it. Detection must not be a gate:
+    `mh download` is routinely run somewhere other than the machine that will
+    run the nodes, and the first interactive Enterprise run on a Fedora laptop
+    dead-ended with "could not work out which bintar this host needs" — the
+    wrong question. `--arch` exists for Community for the same reason.
   - Enterprise comes from DLM and needs a customer token in `MYHAREM_ES_TOKEN`
     or `es_token`. Enterprise publishes one bintar **per distribution**, so the
     target is detected from `/etc/os-release` (`--target` overrides); a

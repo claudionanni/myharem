@@ -204,11 +204,60 @@ def _es_token_or_refuse():
     raise click.ClickException("\n".join(lines))
 
 
-def _resolve_download(edition, version, target):
+def _prompt_for_target(explicit):
+    """Asks which distro the tarball is FOR.
+
+    Detection is a default here, never a gate: `mh download` is routinely run
+    somewhere other than the machine that will run the nodes — a laptop staging
+    a tarball for a repro host, say — so refusing because THIS host is not a
+    distro DLM publishes for would be answering the wrong question. The
+    non-interactive path still refuses, because there is nobody to ask.
+    """
+    if explicit:
+        return explicit
+
+    configured = config.get_es_bintar_target()
+    detected = catalog.detect_dlm_target()
+    suggested = configured or detected
+    note = ' (configured)' if configured else ' (this host)'
+
+    click.echo("\nEnterprise publishes one tarball per distribution — pick the one")
+    click.echo("the nodes will run, which need not be this machine:")
+    default_index = None
+    for i, distro in enumerate(catalog.ES_TARGET_DISTROS, 1):
+        marker = ''
+        if suggested and suggested.startswith(distro + '-'):
+            marker = note
+            default_index = i
+        click.echo(f"  [{i}] {distro}{marker}")
+    choice = click.prompt(
+        "\nSelect distribution",
+        type=click.IntRange(1, len(catalog.ES_TARGET_DISTROS)),
+        default=default_index,
+        show_default=default_index is not None,
+    )
+    distro = catalog.ES_TARGET_DISTROS[choice - 1]
+
+    local = catalog.arch()
+    click.echo("\nArchitecture:")
+    for i, name in enumerate(catalog.ES_ARCHES, 1):
+        click.echo(f"  [{i}] {name}" + ("  (this host)" if name == local else ""))
+    arch_choice = click.prompt(
+        "\nSelect architecture",
+        type=click.IntRange(1, len(catalog.ES_ARCHES)),
+        default=(catalog.ES_ARCHES.index(local) + 1) if local in catalog.ES_ARCHES else 1,
+    )
+    target = f"{distro}-{catalog.ES_ARCHES[arch_choice - 1]}"
+    click.echo(f"  → {target}")
+    return target
+
+
+def _resolve_download(edition, version, target, want_arch=None,
+                      target_note='from --target'):
     """(artifact, summary rows) for a fully specified request."""
     if edition == 'CS':
         release = catalog.resolve_cs_version(version)
-        artifact = catalog.resolve_cs_artifact(release)
+        artifact = catalog.resolve_cs_artifact(release, want_arch)
         rows = [
             ("Edition", "Community Server"),
             ("Version", release),
@@ -219,7 +268,8 @@ def _resolve_download(edition, version, target):
 
     token = _es_token_or_refuse()
     resolved_target, how = catalog.resolve_es_target(
-        explicit=target, configured=config.get_es_bintar_target()
+        explicit=target, configured=config.get_es_bintar_target(),
+        explicit_note=target_note,
     )
     release = catalog.resolve_es_version(version, token)
     artifact = catalog.resolve_es_artifact(release, resolved_target, token)
@@ -273,13 +323,17 @@ def _stage(ctx, artifact, verify):
                    "wizard. Note: `mh --version` prints myharem's own version.")
 @click.option('--target', default=None,
               help="Enterprise bintar target, e.g. rhel-9-x86_64. Defaults to "
-                   "the one detected from /etc/os-release.")
+                   "the one detected from /etc/os-release; the wizard asks.")
+@click.option('--arch', 'want_arch', default=None,
+              help="Architecture for a Community tarball (default: this "
+                   "machine's). For Enterprise the architecture is part of "
+                   "--target.")
 @click.option('--list', 'list_only', is_flag=True,
               help="List what is published and exit.")
 @click.option('--no-verify', 'verify', flag_value=False, default=True,
               help="Skip the published sha256 check (Community).")
 @click.pass_context
-def download(ctx, edition, version, target, list_only, verify):
+def download(ctx, edition, version, target, want_arch, list_only, verify):
     """Downloads a MariaDB tarball into <basedir>/local/ (interactive if no args).
 
     Community comes from downloads.mariadb.org and needs no credentials.
@@ -304,10 +358,10 @@ def download(ctx, edition, version, target, list_only, verify):
                 "terminal to prompt on (piped stdin, cron, or --json).\n"
                 "Example: mh download --edition CS --version 11.4.13"
             )
-        _download_wizard(ctx, edition, target, verify)
+        _download_wizard(ctx, edition, target, want_arch, verify)
         return
 
-    artifact, rows = _resolve_download(edition, version, target)
+    artifact, rows = _resolve_download(edition, version, target, want_arch)
     _stage(ctx, artifact, verify)
 
 
@@ -355,7 +409,7 @@ def _list_catalog(ctx, edition, version):
     _emit_action(ctx, payload, human)
 
 
-def _download_wizard(ctx, edition, target, verify):
+def _download_wizard(ctx, edition, target, want_arch, verify):
     """Interactive download: pick edition, series, release, confirm."""
     if not edition:
         click.echo("\nEdition:")
@@ -418,7 +472,12 @@ def _download_wizard(ctx, edition, target, verify):
     release = shown[choice - 1]
     click.echo(f"  → {release}")
 
-    artifact, rows = _resolve_download(edition, release, target)
+    note = 'from --target'
+    if edition == 'ES':
+        if not target:
+            note = 'chosen'
+        target = _prompt_for_target(target)
+    artifact, rows = _resolve_download(edition, release, target, want_arch, note)
 
     dest = config.get_basedir() / 'local' / artifact.filename
     click.echo("")
