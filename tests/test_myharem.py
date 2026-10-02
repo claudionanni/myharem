@@ -1116,3 +1116,92 @@ def test_series_listing_says_how_to_see_the_releases(basedir, monkeypatch):
     monkeypatch.setattr(catalog, '_fetch_url', _canned_fetch(CS_ROUTES))
     result = CliRunner().invoke(main, ['download', '--list', '-e', 'CS'])
     assert '--version <series>' in result.output
+
+
+def test_es_refusal_says_where_to_get_a_token(basedir, monkeypatch):
+    monkeypatch.delenv('MYHAREM_ES_TOKEN', raising=False)
+    monkeypatch.setattr(catalog, '_fetch_url',
+                        _canned_fetch({"rest/releases": ES_RELEASES_TEXT}))
+    result = CliRunner().invoke(main, ['download', '-e', 'ES', '-v', '11.4'])
+    assert 'customers.mariadb.com/downloads/token' in result.output
+
+
+def test_token_prints_the_page_and_says_none_is_configured(basedir, monkeypatch):
+    monkeypatch.delenv('MYHAREM_ES_TOKEN', raising=False)
+    monkeypatch.delenv('DISPLAY', raising=False)
+    monkeypatch.delenv('WAYLAND_DISPLAY', raising=False)
+    result = CliRunner().invoke(main, ['token'])
+    assert result.exit_code == 0, result.output
+    assert 'customers.mariadb.com/downloads/token' in result.output
+    assert 'No token is configured' in result.output
+
+
+def test_token_never_prints_the_token_itself(basedir, monkeypatch):
+    monkeypatch.setenv('MYHAREM_ES_TOKEN', 'SEKRET-TOKEN')
+    result = CliRunner().invoke(main, ['token'])
+    assert 'SEKRET' not in result.output
+    assert 'already configured' in result.output
+    assert 'MYHAREM_ES_TOKEN' in result.output
+
+
+def test_token_refuses_to_open_a_browser_under_sudo(basedir, monkeypatch):
+    monkeypatch.setenv('SUDO_USER', 'claudio')
+    monkeypatch.setenv('DISPLAY', ':0')
+    opened = []
+    import webbrowser
+    monkeypatch.setattr(webbrowser, 'open', lambda url: opened.append(url))
+    result = CliRunner().invoke(main, ['token'])
+    assert not opened
+    assert 'a browser would open as root' in result.output
+
+
+def test_token_refuses_to_open_a_browser_with_no_display(basedir, monkeypatch):
+    monkeypatch.delenv('SUDO_USER', raising=False)
+    monkeypatch.delenv('DISPLAY', raising=False)
+    monkeypatch.delenv('WAYLAND_DISPLAY', raising=False)
+    monkeypatch.setattr(cli_module.sys, 'platform', 'linux')
+    opened = []
+    import webbrowser
+    monkeypatch.setattr(webbrowser, 'open', lambda url: opened.append(url))
+    result = CliRunner().invoke(main, ['token'])
+    assert not opened
+    assert 'no graphical session' in result.output
+
+
+def test_token_opens_a_browser_on_a_desktop_session(basedir, monkeypatch):
+    monkeypatch.delenv('SUDO_USER', raising=False)
+    monkeypatch.setenv('DISPLAY', ':0')
+    monkeypatch.setattr(cli_module.os, 'geteuid', lambda: 1000)
+    opened = []
+    import webbrowser
+    monkeypatch.setattr(webbrowser, 'open', lambda url: opened.append(url) or True)
+    result = CliRunner().invoke(main, ['token'])
+    assert opened == [catalog.ES_TOKEN_PAGE]
+    assert 'Opened it in your browser' in result.output
+
+
+def test_token_no_open_flag_never_launches(basedir, monkeypatch):
+    monkeypatch.delenv('SUDO_USER', raising=False)
+    monkeypatch.setenv('DISPLAY', ':0')
+    monkeypatch.setattr(cli_module.os, 'geteuid', lambda: 1000)
+    opened = []
+    import webbrowser
+    monkeypatch.setattr(webbrowser, 'open', lambda url: opened.append(url))
+    result = CliRunner().invoke(main, ['token', '--no-open'])
+    assert not opened
+
+
+def test_token_json_carries_no_token_and_does_not_open(basedir, monkeypatch):
+    monkeypatch.setenv('MYHAREM_ES_TOKEN', 'SEKRET-TOKEN')
+    monkeypatch.setenv('DISPLAY', ':0')
+    monkeypatch.delenv('SUDO_USER', raising=False)
+    monkeypatch.setattr(cli_module.os, 'geteuid', lambda: 1000)
+    opened = []
+    import webbrowser
+    monkeypatch.setattr(webbrowser, 'open', lambda url: opened.append(url))
+    result = CliRunner().invoke(main, ['--json', 'token'])
+    payload = json.loads(result.stdout)
+    assert payload['configured'] is True
+    assert payload['source'] == 'env'
+    assert not opened
+    assert 'SEKRET' not in result.output

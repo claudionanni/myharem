@@ -107,6 +107,9 @@ deploy command looks for it.
 - `mh download ... --no-verify` — skip the published sha256 check.
 - `mh fetch-tarball <url> [--name FILENAME]` — download from a URL you already
   have, for anything the catalogue does not cover.
+- `mh token` — where to get the Enterprise download token, and whether one is
+  already configured (never the value). Opens the page in a browser on a desktop
+  session; `--no-open` just prints the address.
 
 Both are idempotent: a file already staged under that name is left alone.
 
@@ -126,7 +129,9 @@ tarball never hits the problem described under *Galera provider* below.
 
 #### Enterprise downloads and the token
 
-Enterprise comes from `dlm.mariadb.com` and needs a customer token; without one
+Enterprise comes from `dlm.mariadb.com` and needs a customer token — run
+`mh token` to get to the page (<https://customers.mariadb.com/downloads/token/>,
+MariaDB ID login), or to check whether one is already set. Without a token
 the command refuses, though it still lists the published Enterprise series so
 you can see what you are missing. Enterprise publishes **one tarball per
 distribution**, not just per architecture, so the right one for this host is

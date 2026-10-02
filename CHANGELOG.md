@@ -33,6 +33,14 @@ All notable changes to MyHarem are documented here.
     entry. A truncated list with no way past it would have hidden most of a long
     series (10.6 publishes 28 releases) — and an old release is frequently the
     whole point of a reproduction.
+- **`mh token`** — prints the Enterprise token page
+  (`customers.mariadb.com/downloads/token/`) and whether a token is already
+  configured and from where, never its value. It opens the page in a browser
+  only on a desktop session: not under sudo, not as root, and not without a
+  DISPLAY, since `mh` normally runs as root over SSH on a headless host where a
+  browser launch either fails silently or starts a text browser as root in the
+  user's terminal. The Enterprise refusal now points at it — it previously named
+  the variable to set without saying where the value comes from.
 - `mh --version` (0.4.1 shipped without one, so a bug report could not say which
   build it came from). `setup.py` now reads `__version__` from the package.
 

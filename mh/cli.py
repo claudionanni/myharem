@@ -76,6 +76,80 @@ def fetch_tarball_command(ctx, url, filename):
     _emit_action(ctx, {'path': str(dest)}, f"Tarball staged at {dest}")
 
 
+# ---------- token ----------
+
+def _can_open_a_browser():
+    """(may_open, why_not) — whether launching a browser here is a good idea.
+
+    Deliberately conservative. `mh` normally runs as root over SSH on a headless
+    repro host, where webbrowser.open() either fails silently (making the
+    feature a lie) or, if a text browser is installed, launches one AS ROOT
+    inside the user's terminal — a surprising thing to have to escape from.
+    """
+    if os.environ.get('SUDO_USER'):
+        return False, "running under sudo (a browser would open as root)"
+    if hasattr(os, 'geteuid') and os.geteuid() == 0:
+        return False, "running as root"
+    if sys.platform == 'darwin':
+        return True, None
+    if os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY'):
+        return True, None
+    return False, "no graphical session (no DISPLAY)"
+
+
+@main.command()
+@click.option('--no-open', 'open_browser', flag_value=False, default=True,
+              help="Only print the address; never launch a browser.")
+@click.pass_context
+def token(ctx, open_browser):
+    """Where to get the MariaDB Enterprise download token, and whether one is set.
+
+    Opens the page in a browser when this is a desktop session; otherwise just
+    prints the address. The token itself is never printed.
+    """
+    configured = config.get_es_token()
+    source = None
+    if configured:
+        source = 'config' if config.es_token_came_from_config() else 'env'
+        config.warn_if_config_is_world_readable()
+
+    may_open, why_not = _can_open_a_browser()
+    opened = False
+    if open_browser and may_open and not ctx.obj.get('json'):
+        import webbrowser
+        try:
+            opened = webbrowser.open(catalog.ES_TOKEN_PAGE)
+        except Exception:
+            opened = False
+
+    lines = [f"Enterprise download token page: {catalog.ES_TOKEN_PAGE}"]
+    if configured:
+        where = ("MYHAREM_ES_TOKEN" if source == 'env'
+                 else "es_token in the myharem config")
+        # Deliberately never the value, not even a prefix: it is a working
+        # credential and this output lands in terminals and tickets.
+        lines.append(f"A token is already configured ({where}).")
+    else:
+        lines.append("No token is configured yet. Sign in with your MariaDB ID,")
+        lines.append("copy the token, then either:")
+        lines.append("  export MYHAREM_ES_TOKEN=...      # and run mh with sudo -E")
+        lines.append("  or add `es_token=...` to the myharem config (chmod 600 it)")
+    if opened:
+        lines.append("Opened it in your browser.")
+    elif open_browser and not may_open:
+        lines.append(f"Not opening a browser: {why_not}.")
+
+    _emit_action(
+        ctx,
+        # No token value, by construction.
+        {'token_page': catalog.ES_TOKEN_PAGE,
+         'configured': bool(configured),
+         'source': source,
+         'opened': opened},
+        "\n".join(lines),
+    )
+
+
 # ---------- download ----------
 
 # How many releases the wizard lists before offering 'show all'.
@@ -106,7 +180,9 @@ def _es_token_or_refuse():
 
     lines = [
         "MariaDB Enterprise downloads need a customer token.",
-        "Set MYHAREM_ES_TOKEN, or add `es_token=...` to the myharem config",
+        f"Get yours at {catalog.ES_TOKEN_PAGE} (MariaDB ID login) — "
+        f"`mh token` opens it.",
+        "Then set MYHAREM_ES_TOKEN, or add `es_token=...` to the myharem config",
         "(chmod 600 it — the token is a secret).",
     ]
     if os.environ.get('SUDO_USER'):

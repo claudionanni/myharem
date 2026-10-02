@@ -31,6 +31,11 @@ from . import report
 
 FOUNDATION_API = 'https://downloads.mariadb.org/rest-api/mariadb'
 DLM_BASE = 'https://dlm.mariadb.com'
+# Where a customer or engineer finds their own download token. Printed, never
+# opened: mh runs as root, usually over SSH on a headless repro host, where
+# launching a browser would at best fail and at worst run one as root — and the
+# page is behind SSO anyway, so it cannot hand the token over unattended.
+ES_TOKEN_PAGE = 'https://customers.mariadb.com/downloads/token/'
 ES_PRODUCT = 'mariadb_enterprise_server'
 
 
