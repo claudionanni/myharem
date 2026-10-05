@@ -25,9 +25,16 @@ from pathlib import Path
 
 import click
 
+from . import catalog
 from . import config
 from . import deployment
 from . import report
+
+#: Upstream publishes a sha256 for the Enterprise helper; there is no published
+#: equivalent for the Community one, so that is fetched over TLS and not verified.
+ES_CHECKSUMS_URL = (
+    'https://dlm.mariadb.com/enterprise-release-helpers/checksums/sha256sums.txt'
+)
 
 OFFICIAL_SCRIPTS = {
     'CS': 'https://r.mariadb.com/downloads/mariadb_repo_setup',
@@ -94,15 +101,50 @@ def _strip_secrets(text, token=None):
     return report.redact(text.replace(token, TOKEN_PLACEHOLDER))
 
 
+def cache_dir():
+    """Where the official scripts are cached.
+
+    `<basedir>/remote` when it is writable — setup_myharem_dirs already creates
+    that directory for exactly this kind of thing — and a per-user cache
+    otherwise. `mh repo` is the one command that needs no root at all, and
+    requiring sudo merely to cache a script would quietly take that away.
+    """
+    shared = config.get_basedir() / 'remote'
+    try:
+        shared.mkdir(parents=True, exist_ok=True)
+        if os.access(shared, os.W_OK):
+            return shared
+    except OSError:
+        pass
+    base = os.environ.get('XDG_CACHE_HOME') or (Path.home() / '.cache')
+    fallback = Path(base) / 'myharem'
+    fallback.mkdir(parents=True, exist_ok=True)
+    return fallback
+
+
+def published_sha256(edition):
+    """The sha256 upstream publishes for this script, or None if it publishes none."""
+    if edition != 'ES':
+        return None
+    try:
+        body = catalog._fetch_url(ES_CHECKSUMS_URL)
+    except Exception:
+        return None
+    for line in body.splitlines():
+        parts = line.split()
+        if len(parts) == 2 and parts[1].lstrip('./') == SCRIPT_NAMES['ES']:
+            return parts[0].lower()
+    return None
+
+
 def script_path(edition, refresh=False):
-    """The official script, cached under <basedir>/remote/.
+    """The official script, cached locally.
 
     Fetched rather than vendored: a vendored copy goes stale silently, and the
-    whole point is to produce what the official tool produces today.
+    point is to produce what the official tool produces today. The user never
+    has to obtain these scripts themselves.
     """
-    cache = config.get_basedir() / 'remote'
-    cache.mkdir(parents=True, exist_ok=True)
-    path = cache / SCRIPT_NAMES[edition]
+    path = cache_dir() / SCRIPT_NAMES[edition]
     if path.exists() and not refresh:
         return path
     if path.exists():
@@ -115,6 +157,25 @@ def script_path(edition, refresh=False):
         raise click.ClickException(
             f"Could not fetch {SCRIPT_NAMES[edition]}: {report.redact(str(exc))}"
         ) from None
+
+    # This script is about to be executed, so verify it where upstream makes
+    # that possible. A mismatch is fatal; an unreachable checksum file is not,
+    # since that would make the command depend on a second endpoint being up.
+    expected = published_sha256(edition)
+    if expected:
+        actual = deployment._sha256(path)
+        if actual != expected:
+            path.unlink(missing_ok=True)
+            raise click.ClickException(
+                f"{SCRIPT_NAMES[edition]} does not match the sha256 published at "
+                f"{ES_CHECKSUMS_URL} (expected {expected}, got {actual}). "
+                f"Refusing to run it."
+            )
+    elif edition == 'ES':
+        report.warn(
+            "Could not fetch the published checksum for "
+            f"{SCRIPT_NAMES[edition]}; it was downloaded over TLS but not verified."
+        )
     return path
 
 

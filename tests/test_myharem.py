@@ -1366,3 +1366,65 @@ def test_repo_wizard_walks_edition_release_distro_arch(basedir, monkeypatch, tmp
     assert result.exit_code == 0, result.output
     assert '→ RHEL / Rocky / Alma 9' in result.output
     assert (tmp_path / 'mariadb-11.4.13-rhel-9.repo').exists()
+
+
+SHA_SUMS = (
+    "36cbeab52419d36dec10f1eee0ca0b8b7526dd4391d8855178c47fc5859386f4  "
+    "./mariadb_es_repo_setup\n"
+    "a406d380c0296c2b90b64f977e31b5b0de67fa91dde3903b78759a535aaf0fab  "
+    "./install-enterprise-manager.sh\n"
+)
+
+
+def test_setup_dirs_warns_instead_of_crashing_when_it_cannot_write(monkeypatch,
+                                                                   tmp_path):
+    """`mh repo --help` must not traceback for a user who is not root."""
+    conf = tmp_path / 'myharem.conf'
+    conf.write_text("[DEFAULT]\nbasedir=/proc/cannot/exist\n")
+    monkeypatch.setenv('MYHAREM_CONF', str(conf))
+    warnings = []
+    monkeypatch.setattr(report, 'warn', warnings.append)
+    config.setup_myharem_dirs()          # must not raise
+    assert warnings and 'Could not prepare' in warnings[0]
+
+
+def test_script_cache_falls_back_to_a_user_directory(monkeypatch, tmp_path):
+    conf = tmp_path / 'myharem.conf'
+    conf.write_text("[DEFAULT]\nbasedir=/proc/cannot/exist\n")
+    monkeypatch.setenv('MYHAREM_CONF', str(conf))
+    monkeypatch.setenv('XDG_CACHE_HOME', str(tmp_path / 'cache'))
+    assert repo.cache_dir() == tmp_path / 'cache' / 'myharem'
+
+
+def test_script_cache_prefers_the_shared_remote_dir(basedir, monkeypatch, tmp_path):
+    monkeypatch.setenv('XDG_CACHE_HOME', str(tmp_path / 'cache'))
+    assert repo.cache_dir() == basedir / 'remote'
+
+
+def test_published_sha256_parses_the_upstream_sums_file(monkeypatch):
+    monkeypatch.setattr(catalog, '_fetch_url', lambda url, timeout=30: SHA_SUMS)
+    assert repo.published_sha256('ES').startswith('36cbeab5')
+    assert repo.published_sha256('CS') is None       # none is published
+
+
+def test_a_tampered_enterprise_script_is_refused(basedir, monkeypatch):
+    """It is about to be executed, so a mismatch must be fatal."""
+    monkeypatch.setattr(catalog, '_fetch_url', lambda url, timeout=30: SHA_SUMS)
+    monkeypatch.setattr(deployment, '_download',
+                        lambda url, dest, timeout=300: Path(dest).write_text('evil'))
+    with pytest.raises(click.ClickException, match='Refusing to run it'):
+        repo.script_path('ES')
+    assert not (basedir / 'remote' / 'mariadb_es_repo_setup').exists()
+
+
+def test_an_unverifiable_enterprise_script_warns_but_proceeds(basedir, monkeypatch):
+    def no_checksums(url, timeout=30):
+        raise OSError('checksums unreachable')
+    monkeypatch.setattr(catalog, '_fetch_url', no_checksums)
+    monkeypatch.setattr(deployment, '_download',
+                        lambda url, dest, timeout=300: Path(dest).write_text('#!/bin/bash'))
+    warnings = []
+    monkeypatch.setattr(report, 'warn', warnings.append)
+    path = repo.script_path('ES')
+    assert path.exists()
+    assert warnings and 'not verified' in warnings[0]

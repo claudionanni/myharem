@@ -182,6 +182,12 @@ mh repo --edition CS --version 11.4.5 --os rhel --os-version 9
 # Install as /etc/yum.repos.d/mariadb.repo on the target host.
 ```
 
+You do **not** need the repo-setup scripts yourself: `mh repo` fetches the
+official one on first use and caches it (in `<basedir>/remote/` when that is
+writable, otherwise `~/.cache/myharem/`, so this command needs no root at all).
+`--refresh-script` re-fetches. The Enterprise helper is checked against the
+sha256 MariaDB publishes before it is run.
+
 `--os-version` takes what the official script takes, which is not always what a
 human would say: `8`/`9`/`10` for rhel and sles, but the **codename** for Ubuntu
 (`jammy`, `noble`) and Debian (`bullseye`, `bookworm`, `trixie`). The wizard's

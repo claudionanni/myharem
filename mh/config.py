@@ -183,8 +183,17 @@ def setup_myharem_dirs():
         basedir / 'logs',
     ]
 
-    for d in dirs_to_create:
-        d.mkdir(parents=True, exist_ok=True)
+    try:
+        for d in dirs_to_create:
+            d.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        # Runs from the group callback, i.e. before every command including
+        # --help. Commands that manage instances need root anyway and will fail
+        # with their own clear error; `mh repo`, `mh token` and `mh download
+        # --list` need no directories at all, and a traceback here used to deny
+        # them to any non-root user.
+        report.warn(f"Could not prepare {basedir}: {exc}")
+        return
 
     # Only chown the top-level dirs, not the entire tree
     _chown_dirs(dirs_to_create)

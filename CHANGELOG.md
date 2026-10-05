@@ -57,6 +57,20 @@ All notable changes to MyHarem are documented here.
   script validates it against DLM on every run, with no skip flag, so a
   placeholder cannot be used to generate — but it is kept out of the saved file,
   the error text and the logs.
+- `mh repo` fetches the official script itself and caches it, so nobody has to
+  obtain it: `<basedir>/remote/` when writable, `~/.cache/myharem/` otherwise.
+  The fallback matters — the cache used to live only under the root-owned
+  basedir, which quietly made the one command that needs no root need sudo. The
+  Enterprise helper is verified against the sha256 MariaDB publishes before it
+  is executed; a mismatch is fatal, an unreachable checksum file only warns.
+
+### Fixed
+- **`setup_myharem_dirs()` no longer kills every command when it cannot write.**
+  It runs from the group callback, so on a host where the basedir does not exist
+  and the user is not root, even `mh repo --help` ended in a PermissionError
+  traceback. It now warns and continues; the commands that manage instances need
+  root anyway and fail with their own clear errors.
+
 - **`mh token`** — prints the Enterprise token page
   (`customers.mariadb.com/downloads/token/`) and whether a token is already
   configured and from where, never its value. It opens the page in a browser
