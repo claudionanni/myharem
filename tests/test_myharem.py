@@ -18,7 +18,7 @@ from click.testing import CliRunner
 import mh
 from mh import cli as cli_module
 from mh import (catalog, config, deployment, galera, manifest, model,
-                replication, report, service)
+                replication, repo, report, service)
 from mh.cli import main
 
 
@@ -1254,3 +1254,115 @@ def test_community_arch_can_differ_from_this_machine(basedir, monkeypatch):
         main, ['--json', 'download', '-e', 'CS', '-v', '11.4.13', '--arch', 'aarch64'])
     assert result.exit_code != 0
     assert 'aarch64' in result.output
+
+
+# --------------------------------------------------------------------------
+# mh repo — wrapping the official repo-setup scripts as generators
+# --------------------------------------------------------------------------
+
+def test_repo_filename_follows_the_package_family():
+    assert repo.repo_filename('CS', '11.4.5', 'rhel', '9') == \
+        'mariadb-11.4.5-rhel-9.repo'
+    assert repo.repo_filename('CS', '11.4.5', 'ubuntu', 'jammy') == \
+        'mariadb-11.4.5-ubuntu-jammy.list'
+    assert repo.repo_filename('ES', '11.4.9-6', 'debian', 'bookworm') == \
+        'mariadb-es-11.4.9-6-debian-bookworm.list'
+
+
+def test_repo_install_path_matches_the_family():
+    assert repo.install_path('rhel') == '/etc/yum.repos.d/mariadb.repo'
+    assert repo.install_path('sles') == '/etc/yum.repos.d/mariadb.repo'
+    assert repo.install_path('ubuntu') == '/etc/apt/sources.list.d/mariadb.list'
+
+
+def test_repo_args_keep_the_scripts_in_generate_only_mode():
+    """The two flags that make this safe: nothing written, no keys imported."""
+    cs = repo.build_args('CS', '11.4.5', 'rhel', '9', 'x86_64')
+    assert '--write-to-stdout' in cs
+    assert '--skip-key-import' in cs
+    es = repo.build_args('ES', '11.4.9-6', 'rhel', '9', 'x86_64', token='TOK')
+    # No --apply: for the Enterprise script that is what gates writing AND
+    # key import.
+    assert '--apply' not in es
+    assert '--token=TOK' in es
+    assert '--skip-key-import' in es
+
+
+def test_repo_errors_hide_the_enterprise_token_but_keep_community_urls():
+    # not a substring of TOKEN_PLACEHOLDER, or the assertion tests itself
+    secret = 'a1b2c3-secret'
+    leaky = (f"Invalid token format: '{secret}' "
+             f"see https://dlm.mariadb.com/browse/{secret}/")
+    hidden = repo._strip_secrets(leaky, secret)
+    assert secret not in hidden
+    # A Community failure has no secret, and its message links the release notes.
+    community = "version is not working, see https://mariadb.com/docs/release-notes/"
+    assert repo._strip_secrets(community, None) == community
+
+
+def _fake_generate(content):
+    def generate(edition, version, os_type, os_version, arch, token=None,
+                 refresh_script=False):
+        return content, ''
+    return generate
+
+
+def test_repo_writes_a_named_file_for_community(basedir, monkeypatch, tmp_path):
+    monkeypatch.setattr(repo, 'generate', _fake_generate("[mariadb-main]\n"))
+    result = CliRunner().invoke(main, [
+        'repo', '-e', 'CS', '-v', '11.4.5', '--os', 'rhel', '--os-version', '9',
+        '--out', str(tmp_path)])
+    assert result.exit_code == 0, result.output
+    written = tmp_path / 'mariadb-11.4.5-rhel-9.repo'
+    assert written.read_text() == "[mariadb-main]\n"
+    assert '/etc/yum.repos.d/mariadb.repo' in result.output
+
+
+def test_repo_replaces_the_enterprise_token_with_a_placeholder(basedir, monkeypatch,
+                                                               tmp_path):
+    monkeypatch.setenv('MYHAREM_ES_TOKEN', 'SEKRET-TOKEN')
+    monkeypatch.setattr(
+        repo, 'generate',
+        _fake_generate("baseurl = https://dlm.mariadb.com/SEKRET-TOKEN/es/\n"))
+    result = CliRunner().invoke(main, [
+        'repo', '-e', 'ES', '-v', '11.4.9-6', '--os', 'rhel', '--os-version', '9',
+        '--out', str(tmp_path)])
+    assert result.exit_code == 0, result.output
+    written = tmp_path / 'mariadb-es-11.4.9-6-rhel-9.repo'
+    assert 'SEKRET-TOKEN' not in written.read_text()
+    assert repo.TOKEN_PLACEHOLDER in written.read_text()
+    assert 'SEKRET' not in result.output
+
+
+def test_repo_with_token_writes_a_credential_mode_600(basedir, monkeypatch, tmp_path):
+    monkeypatch.setenv('MYHAREM_ES_TOKEN', 'SEKRET-TOKEN')
+    monkeypatch.setattr(
+        repo, 'generate',
+        _fake_generate("baseurl = https://dlm.mariadb.com/SEKRET-TOKEN/es/\n"))
+    result = CliRunner().invoke(main, [
+        'repo', '-e', 'ES', '-v', '11.4.9-6', '--os', 'rhel', '--os-version', '9',
+        '--with-token', '--out', str(tmp_path)])
+    assert result.exit_code == 0, result.output
+    written = tmp_path / 'mariadb-es-11.4.9-6-rhel-9.repo'
+    assert 'SEKRET-TOKEN' in written.read_text()
+    assert oct(written.stat().st_mode)[-3:] == '600'
+    # the path is printed, the token is not
+    assert 'SEKRET' not in result.output
+
+
+def test_repo_requires_flags_when_there_is_no_terminal(basedir):
+    result = CliRunner().invoke(main, ['repo'])
+    assert result.exit_code == 2
+    assert '--os-version' in result.output
+
+
+def test_repo_wizard_walks_edition_release_distro_arch(basedir, monkeypatch, tmp_path):
+    monkeypatch.setattr(catalog, '_fetch_url', _canned_fetch(CS_ROUTES))
+    monkeypatch.setattr(repo, 'generate', _fake_generate("[mariadb-main]\n"))
+    monkeypatch.setattr(cli_module, '_stdin_is_tty', lambda: True)
+    # CS, series 1 (11.4), release 1 (11.4.13), distro 2 (rhel 9), arch 1
+    result = CliRunner().invoke(main, ['repo', '--out', str(tmp_path)],
+                                input="1\n1\n1\n2\n1\n")
+    assert result.exit_code == 0, result.output
+    assert '→ RHEL / Rocky / Alma 9' in result.output
+    assert (tmp_path / 'mariadb-11.4.13-rhel-9.repo').exists()

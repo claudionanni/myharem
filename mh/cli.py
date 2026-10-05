@@ -1,6 +1,7 @@
 import json
 import os
 import sys
+from pathlib import Path
 
 import click
 
@@ -10,6 +11,7 @@ from . import config
 from . import deployment
 from . import galera
 from . import manifest
+from . import repo
 from . import report
 from . import service
 from .instance import Instance
@@ -74,6 +76,145 @@ def fetch_tarball_command(ctx, url, filename):
     """Downloads a tarball into <basedir>/local/ (skipped if already staged)."""
     dest = deployment.fetch_tarball(url, filename=filename)
     _emit_action(ctx, {'path': str(dest)}, f"Tarball staged at {dest}")
+
+
+# ---------- repo ----------
+
+def _prompt_for_repo_target(os_type, os_version):
+    """Which distro the repository file is for."""
+    if os_type and os_version:
+        return os_type, os_version
+    click.echo("\nTarget distribution:")
+    for i, (_, _, label) in enumerate(repo.TARGETS, 1):
+        click.echo(f"  [{i}] {label}")
+    choice = click.prompt("\nSelect distribution",
+                          type=click.IntRange(1, len(repo.TARGETS)))
+    os_type, os_version, label = repo.TARGETS[choice - 1]
+    click.echo(f"  → {label}")
+    return os_type, os_version
+
+
+def _prompt_for_repo_arch(want_arch):
+    if want_arch:
+        return want_arch
+    local = catalog.arch()
+    click.echo("\nArchitecture:")
+    for i, name in enumerate(catalog.ES_ARCHES, 1):
+        click.echo(f"  [{i}] {name}" + ("  (this host)" if name == local else ""))
+    choice = click.prompt(
+        "\nSelect architecture", type=click.IntRange(1, len(catalog.ES_ARCHES)),
+        default=(catalog.ES_ARCHES.index(local) + 1) if local in catalog.ES_ARCHES else 1,
+    )
+    return catalog.ES_ARCHES[choice - 1]
+
+
+@main.command(name='repo')
+@click.option('--edition', '-e', 'edition', default=None,
+              help="CS (Community) or ES (Enterprise). Omit for the wizard.")
+@click.option('--version', '-v', 'version', default=None,
+              help="MariaDB version, e.g. 11.4.5 (Community) or 11.4.9-6 "
+                   "(Enterprise, build number included).")
+@click.option('--os', 'os_type', default=None,
+              help="rhel, ubuntu, debian or sles.")
+@click.option('--os-version', 'os_version', default=None,
+              help="8/9/10 for rhel and sles; the CODENAME for ubuntu (jammy, "
+                   "noble) and debian (bullseye, bookworm, trixie).")
+@click.option('--arch', 'want_arch', default=None,
+              help="x86_64 or aarch64 (default: this machine's).")
+@click.option('--out', 'out', default=None,
+              help="Directory or file to write to (default: the current one).")
+@click.option('--stdout', 'to_stdout', is_flag=True,
+              help="Print the file instead of writing it.")
+@click.option('--with-token', 'with_token', is_flag=True,
+              help="Enterprise: write the real token into the file instead of a "
+                   "placeholder. The result is a credential, so it is written "
+                   "mode 600.")
+@click.option('--refresh-script', 'refresh_script', is_flag=True,
+              help="Re-fetch MariaDB's repo-setup script before running it.")
+@click.pass_context
+def repo_command(ctx, edition, version, os_type, os_version, want_arch, out,
+                 to_stdout, with_token, refresh_script):
+    """Writes a MariaDB repository file for a given version and distribution.
+
+    Runs MariaDB's own repo-setup script in its generate-only mode, so the file
+    says exactly what the official tool would have installed — but nothing is
+    installed, nothing needs root, and the target can be any supported distro,
+    not this machine. Copy the result to the target host yourself.
+    """
+    edition = _normalise_edition(edition)
+
+    token = None
+    if edition == 'ES':
+        token = _es_token_or_refuse()
+
+    interactive = not (edition and version and os_type and os_version)
+    if interactive:
+        if ctx.obj.get('json') or not _stdin_is_tty():
+            raise click.UsageError(
+                "mh repo needs --edition, --version, --os and --os-version when "
+                "there is no terminal to prompt on (piped stdin, cron, or "
+                "--json).\nExample: mh repo --edition CS --version 11.4.5 "
+                "--os rhel --os-version 9"
+            )
+        if not edition:
+            click.echo("\nEdition:")
+            click.echo("  [1] Community Server (CS)")
+            click.echo("  [2] Enterprise Server (ES — needs a customer token)")
+            choice = click.prompt("\nSelect edition", type=click.IntRange(1, 2),
+                                  default=1)
+            edition = 'CS' if choice == 1 else 'ES'
+            click.echo(f"  → {'Community' if edition == 'CS' else 'Enterprise'} Server")
+            if edition == 'ES':
+                token = _es_token_or_refuse()
+        version = version or _prompt_for_release(edition)
+        os_type, os_version = _prompt_for_repo_target(os_type, os_version)
+        want_arch = _prompt_for_repo_arch(want_arch)
+
+    want_arch = want_arch or catalog.arch()
+    content, notes = repo.generate(edition, version, os_type, os_version,
+                                   want_arch, token=token,
+                                   refresh_script=refresh_script)
+
+    carries_token = False
+    if edition == 'ES':
+        if with_token:
+            carries_token = repo.contains_token(content, token)
+        else:
+            content = repo.redact_token(content, token)
+
+    filename = repo.repo_filename(edition, version, os_type, os_version)
+    target = repo.install_path(os_type)
+
+    if to_stdout:
+        click.echo(content, nl=False)
+        report.log(f"Install as {target} on the target host.")
+        return
+
+    destination = Path(out) if out else Path.cwd()
+    if destination.is_dir():
+        destination = destination / filename
+    destination.write_text(content)
+    # A file carrying the real token is a working credential; one carrying the
+    # placeholder is safe to paste into a ticket, which is the whole point of
+    # the placeholder being the default.
+    destination.chmod(0o600 if carries_token else 0o644)
+
+    human = [f"Wrote {destination}", f"Install as {target} on the target host."]
+    if edition == 'ES' and not carries_token:
+        human.append(f"The token is replaced by {repo.TOKEN_PLACEHOLDER} — "
+                     f"substitute it on the target, or re-run with --with-token.")
+    elif carries_token:
+        human.append("It contains the real token: treat the file as a credential "
+                     "(written mode 600).")
+
+    _emit_action(
+        ctx,
+        {'path': str(destination), 'filename': filename, 'edition': edition,
+         'version': version, 'os_type': os_type, 'os_version': os_version,
+         'arch': want_arch, 'install_path': target,
+         'token_included': carries_token},
+        "\n".join(human),
+    )
 
 
 # ---------- token ----------
@@ -202,6 +343,59 @@ def _es_token_or_refuse():
     lines.append("Community downloads need no token:")
     lines.append("  mh download --edition CS --version 11.4")
     raise click.ClickException("\n".join(lines))
+
+
+def _prompt_for_release(edition):
+    """Series, then release. Shared by `mh download` and `mh repo`."""
+    if edition == 'CS':
+        report.log("Fetching the MariaDB release list ...")
+        series_list = catalog.list_cs_series()
+        click.echo("\nSeries:")
+        for i, entry in enumerate(series_list, 1):
+            click.echo(f"  [{i}] {entry.id:<8} {entry.label()}")
+        choice = click.prompt("\nSelect series",
+                              type=click.IntRange(1, len(series_list)))
+        series = series_list[choice - 1].id
+    else:
+        report.log("Fetching the MariaDB Enterprise release list ...")
+        series_list = catalog.list_es_series()
+        click.echo("\nSeries:")
+        for i, sid in enumerate(series_list, 1):
+            click.echo(f"  [{i}] {sid}")
+        choice = click.prompt("\nSelect series",
+                              type=click.IntRange(1, len(series_list)))
+        series = series_list[choice - 1]
+    click.echo(f"  → {series}")
+
+    report.log(f"Fetching the {series} releases ...")
+    if edition == 'CS':
+        releases = catalog.list_cs_releases(series)
+    else:
+        releases = catalog.list_es_releases(series, config.get_es_token())
+
+    # Newest first, truncated — but never truncated with no way out: a long
+    # series has far more than fits on a screen (10.6 has 28), and the whole
+    # point of reproducing a customer's problem is often an OLD release.
+    shown = releases[:_RELEASES_SHOWN]
+    while True:
+        click.echo(f"\nReleases in {series}:")
+        for i, entry in enumerate(shown, 1):
+            click.echo(f"  [{i}] {entry}")
+        truncated = len(shown) < len(releases)
+        if truncated:
+            click.echo(f"  [0] show all {len(releases)}")
+        choice = click.prompt(
+            "\nSelect release",
+            type=click.IntRange(0 if truncated else 1, len(shown)),
+            default=1,
+        )
+        if choice == 0:
+            shown = releases
+            continue
+        break
+    release = shown[choice - 1]
+    click.echo(f"  → {release}")
+    return release
 
 
 def _prompt_for_target(explicit):
@@ -425,52 +619,7 @@ def _download_wizard(ctx, edition, target, want_arch, verify):
         # than a menu the user cannot act on.
         _es_token_or_refuse()
 
-    if edition == 'CS':
-        report.log("Fetching the MariaDB release list ...")
-        series_list = catalog.list_cs_series()
-        click.echo("\nSeries:")
-        for i, s in enumerate(series_list, 1):
-            click.echo(f"  [{i}] {s.id:<8} {s.label()}")
-        choice = click.prompt("\nSelect series", type=click.IntRange(1, len(series_list)))
-        series = series_list[choice - 1].id
-    else:
-        report.log("Fetching the MariaDB Enterprise release list ...")
-        series_list = catalog.list_es_series()
-        click.echo("\nSeries:")
-        for i, sid in enumerate(series_list, 1):
-            click.echo(f"  [{i}] {sid}")
-        choice = click.prompt("\nSelect series", type=click.IntRange(1, len(series_list)))
-        series = series_list[choice - 1]
-    click.echo(f"  → {series}")
-
-    report.log(f"Fetching the {series} releases ...")
-    if edition == 'CS':
-        releases = catalog.list_cs_releases(series)
-    else:
-        releases = catalog.list_es_releases(series, config.get_es_token())
-
-    # Newest first, truncated — but never truncated with no way out: a long
-    # series has far more than fits on a screen (10.6 has 28), and the whole
-    # point of reproducing a customer's problem is often an OLD release.
-    shown = releases[:_RELEASES_SHOWN]
-    while True:
-        click.echo(f"\nReleases in {series}:")
-        for i, release in enumerate(shown, 1):
-            click.echo(f"  [{i}] {release}")
-        truncated = len(shown) < len(releases)
-        if truncated:
-            click.echo(f"  [0] show all {len(releases)}")
-        choice = click.prompt(
-            "\nSelect release",
-            type=click.IntRange(0 if truncated else 1, len(shown)),
-            default=1,
-        )
-        if choice == 0:
-            shown = releases
-            continue
-        break
-    release = shown[choice - 1]
-    click.echo(f"  → {release}")
+    release = _prompt_for_release(edition)
 
     note = 'from --target'
     if edition == 'ES':

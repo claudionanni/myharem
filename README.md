@@ -162,6 +162,37 @@ There is deliberately no `--token` flag, and you should not write
 the download URL, so either would put a working credential in your shell history
 and in `ps`, where every user on the host can read it.
 
+### Repository files
+
+Generates a repository file for a given MariaDB version and distribution, by
+running **MariaDB's own repo-setup script** in its generate-only mode. Nothing is
+installed, nothing needs root, and the target can be any supported distro — not
+just this machine. Useful for answering "what should this customer's
+`mariadb.repo` actually say?" without touching a system.
+
+- `mh repo` — interactive: edition, version, distribution, architecture.
+- `mh repo --edition CS|ES --version <v> --os <type> --os-version <v>` —
+  non-interactive. `--arch`, `--out`, `--stdout` as expected.
+- `mh repo ... --with-token` — Enterprise: write the real token into the file
+  instead of a placeholder (the result is a credential, written mode 600).
+
+```bash
+mh repo --edition CS --version 11.4.5 --os rhel --os-version 9
+# Wrote mariadb-11.4.5-rhel-9.repo
+# Install as /etc/yum.repos.d/mariadb.repo on the target host.
+```
+
+`--os-version` takes what the official script takes, which is not always what a
+human would say: `8`/`9`/`10` for rhel and sles, but the **codename** for Ubuntu
+(`jammy`, `noble`) and Debian (`bullseye`, `bookworm`, `trixie`). The wizard's
+menu removes the guesswork.
+
+An Enterprise file is written with `__MARIADB_ES_TOKEN__` in place of the token
+by default, so it is safe to paste into a ticket — substitute the real one on the
+target, or pass `--with-token`. Note the repository carries a **smaller set of
+versions than the tarballs do**: the script refuses a version that has no
+repository for that distribution, and says which ones exist.
+
 ### Deploy
 
 - `mh deploy` — interactive wizard (pick tarball, type, IDs).

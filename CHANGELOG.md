@@ -39,6 +39,24 @@ All notable changes to MyHarem are documented here.
     entry. A truncated list with no way past it would have hidden most of a long
     series (10.6 publishes 28 releases) — and an old release is frequently the
     whole point of a reproduction.
+- **`mh repo`** — generates a repository file for a given version and
+  distribution by running **MariaDB's own repo-setup script** in its
+  generate-only mode (`--write-to-stdout` for Community; no `--apply` for
+  Enterprise, which is what gates both the file writes and the key import
+  there). It wraps rather than reimplements deliberately: those scripts are ~1000
+  and ~1300 lines that already know every supported distro, suite and
+  architecture, and they are what the MariaDB docs tell customers to run — a
+  second implementation would be a second source of truth. Nothing is installed,
+  nothing needs root, and the target can be any supported distro rather than this
+  machine. `--os-version` hides a real trap: Ubuntu insists on the codename
+  (`jammy`, not `22.04`) while Debian takes either, so the wizard offers a menu.
+  An Enterprise file carries `__MARIADB_ES_TOKEN__` instead of the token unless
+  `--with-token` is given, because a repo file pasted into a support ticket is
+  otherwise a working credential; with the real token it is written mode 600.
+  The token does reach the script's argv, which cannot be avoided — the official
+  script validates it against DLM on every run, with no skip flag, so a
+  placeholder cannot be used to generate — but it is kept out of the saved file,
+  the error text and the logs.
 - **`mh token`** — prints the Enterprise token page
   (`customers.mariadb.com/downloads/token/`) and whether a token is already
   configured and from where, never its value. It opens the page in a browser
